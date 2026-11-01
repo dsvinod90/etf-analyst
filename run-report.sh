@@ -13,8 +13,13 @@ LOG="$LOGS/run-$(date +%Y-%m-%d-%H%M).log"
 START_MARKER="$LOGS/.run-start"
 touch "$START_MARKER"
 
+# notify SUBTITLE MESSAGE FILE -- clicking the notification opens FILE
+# (terminal-notifier; falls back to a plain, non-clickable osascript notification)
 notify() {
-  osascript -e "display notification \"$2\" with title \"ETF Analyst\" subtitle \"$1\"" 2>/dev/null || true
+  terminal-notifier -title "ETF Analyst" -subtitle "$1" -message "$2" \
+    -execute "open '$3'" -group etf-analyst -sound default >/dev/null 2>&1 \
+    || osascript -e "display notification \"$2\" with title \"ETF Analyst\" subtitle \"$1\"" 2>/dev/null \
+    || true
 }
 
 cd "$REPO" || exit 1
@@ -31,10 +36,10 @@ PDF=$(find "$REPORTS" -maxdepth 1 -name 'etf-report-*.pdf' -newer "$START_MARKER
 echo "== agent finished $(date), exit $STATUS, pdf: ${PDF:-none}" >>"$LOG"
 
 if [[ $STATUS -ne 0 || -z "$PDF" ]]; then
-  notify "Run failed" "See $(basename "$LOG")"
+  notify "Run failed" "Click to view the log" "$LOG"
   echo "etf-analyst run failed; see $LOG" >&2
   exit 1
 fi
 
-notify "Report ready" "$(basename "$PDF")"
+notify "Report ready" "Click to open $(basename "$PDF")" "$PDF"
 echo "$PDF"
