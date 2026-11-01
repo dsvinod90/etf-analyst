@@ -62,4 +62,18 @@ launchctl bootout gui/$(id -u)/com.dsvinod90.etf-analyst
 
 The paths in the plist are absolute; edit them if the repo lives somewhere other than `~/Dev/etf-analyst`.
 
+## Development
+
+Coding standards and project rules are in [CLAUDE.md](CLAUDE.md). The scripts need only the
+Python 3.12 standard library; dev tools are pinned in `requirements-dev.txt`.
+
+```sh
+make venv     # create .venv with ruff, mypy, pytest
+make format   # format and auto-fix
+make check    # lint (ruff + shellcheck), mypy --strict, pytest with coverage
+```
+
+CI (`.github/workflows/ci.yml`) runs `make lint`, `make typecheck` and `make test` on every push
+and pull request. It needs no secrets.
+
 Output is informational analysis, not financial advice.

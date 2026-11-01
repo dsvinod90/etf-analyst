@@ -1,0 +1,66 @@
+[project]
+name = "etf-analyst"
+version = "0.1.0"
+description = "Claude Code agents that screen US ETFs, write a report, verify it and publish a PDF"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []  # standard library only at runtime
+
+# Dev tools are pinned in requirements-dev.txt; markdown is an optional PDF fallback.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # import sorting
+    "N",        # pep8 naming
+    "UP",       # modern syntax for the target Python
+    "B",        # likely bugs (bugbear)
+    "SIM",      # simplifications
+    "C4",       # comprehensions
+    "PTH",      # pathlib over os.path
+    "RET",      # return statements
+    "S",        # security (bandit)
+    "D",        # docstrings
+    "ANN",      # type annotations
+    "RUF100",   # unused or unnecessary noqa comments
+]
+ignore = [
+    "D203", "D213",  # pick one docstring layout (D211 + D212)
+    "S603",          # subprocess with a list of args is the safe form we require
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "D", "ANN"]  # asserts are how pytest works; tests needn't be documented
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+files = ["*.py", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["markdown"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]  # the scripts live at the repo root
+addopts = "-ra --strict-markers --cov=. --cov-report=term-missing"
+
+[tool.coverage.run]
+omit = ["tests/*", ".venv/*"]
+
+[tool.coverage.report]
+fail_under = 80
+exclude_also = ["if __name__ == .__main__.:"]

@@ -5,3 +5,8 @@ __pycache__/
 reports/
 *.swp
 *.swo
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage

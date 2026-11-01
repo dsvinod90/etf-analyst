@@ -23,6 +23,8 @@ This pulls ~200 candidates from Yahoo Finance's ETF screeners (Morningstar 4–5
 - `long_term_picks` and `short_term_picks` — top 15 by score, each with price, returns (1m–1y), CAGR (3/5/10y), volatility, 5y max drawdown, dividend yield, expense ratio, 50/200-day averages, RSI, `scores`, and `flags`.
 - `benchmarks` — the default funds that didn't make either list, for comparison.
 
+The metrics (percent change, moving average, RSI, volatility, max drawdown, CAGR) are computed by the functions in `~/Dev/etf-analyst/calc.py`; each has a docstring saying exactly how it's calculated. Read them if you need to explain or double-check a metric.
+
 Options: `--top 25` for longer lists. If the user names specific ETFs to compare, pass them instead: `... fetch_etf_data.py VOO QQQM SCHD` (expense ratio will be null in this mode — look it up).
 
 **How the scores work** (so you can explain them):

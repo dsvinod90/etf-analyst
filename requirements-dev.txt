@@ -1,0 +1,7 @@
+# Development tools (the scripts themselves need only the standard library).
+# Install into a virtualenv:  make venv   (or: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt)
+markdown==3.11.2      # PDF fallback when pandoc is missing; also lets tests run without pandoc
+mypy==2.4.1
+pytest==9.2.0
+pytest-cov==7.1.0
+ruff==0.17.3
