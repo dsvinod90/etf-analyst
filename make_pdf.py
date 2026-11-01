@@ -15,6 +15,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+REPORTS = Path(__file__).resolve().parent / "reports"
+
 CHROME_PATHS = [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -208,6 +210,14 @@ def build_html(report_md, title, verification_md=None):
             f"<body>{colour_numbers(body)}</body></html>")
 
 
+def in_reports(path, suffix, what):
+    """Resolve PATH and refuse anything outside reports/ (the agents that call this read untrusted web content)."""
+    p = path.expanduser().resolve()
+    if not p.is_relative_to(REPORTS) or p.suffix != suffix:
+        sys.exit(f"{what} must be a {suffix} file inside {REPORTS}")
+    return p
+
+
 def find_chrome():
     for p in CHROME_PATHS:
         if Path(p).exists():
@@ -225,12 +235,13 @@ def main():
     ap.add_argument("--verification", type=Path,
                     help="verification report to show as a confidence badge + appendix")
     args = ap.parse_args()
-    out = (args.out or args.report.with_suffix(".pdf")).resolve()
-    verification = args.verification.read_text() if args.verification else None
+    report = in_reports(args.report, ".md", "report")
+    out = in_reports(args.out or report.with_suffix(".pdf"), ".pdf", "output")
+    verification = in_reports(args.verification, ".md", "verification").read_text() if args.verification else None
 
     with tempfile.TemporaryDirectory() as tmp:
         page = Path(tmp) / "report.html"
-        page.write_text(build_html(args.report.read_text(), args.report.stem, verification))
+        page.write_text(build_html(report.read_text(), report.stem, verification))
         subprocess.run([find_chrome(), "--headless", "--disable-gpu", "--no-pdf-header-footer",
                         "--virtual-time-budget=10000",  # let web fonts load before printing
                         f"--print-to-pdf={out}", page.as_uri()],

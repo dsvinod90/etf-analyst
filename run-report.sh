@@ -27,29 +27,25 @@ notify() {
 }
 
 # What the unattended agents may do without asking. Anything else is denied.
-# The agents read web pages, which could contain injected instructions, so:
-#  - Bash may run only this project's own scripts (no `python3 -c`, no other commands)
+# The agents read web search results, which could contain injected instructions, so:
+#  - Bash may run only this project's own scripts (no `python3 -c`, no other commands);
+#    the scripts themselves refuse file paths outside reports/
 #  - files may be read only inside the repo and written only under reports/
-#  - pages may be fetched only from these financial sites (blocks sending data elsewhere)
+#  - WebFetch is removed entirely, so nothing can be sent out encoded in a URL;
+#    research uses WebSearch results only
 SCRIPTS=(fetch_etf_data.py make_pdf.py verify_tables.py calc.py)
-ALLOWED=(WebSearch "Read(~/Dev/etf-analyst/**)" "Edit(~/Dev/etf-analyst/reports/**)" "Bash(ls ~/Dev/etf-analyst/reports:*)")
+ALLOWED=(WebSearch "Read(~/Dev/etf-analyst/**)" "Edit(~/Dev/etf-analyst/reports/**)")
 for s in "${SCRIPTS[@]}"; do
   ALLOWED+=("Bash(python3 ~/Dev/etf-analyst/$s:*)" "Bash(python3 $REPO/$s:*)")
 done
-for d in vanguard.com investor.vanguard.com schwab.com schwabassetmanagement.com ishares.com ssga.com \
-         invesco.com ftportfolios.com franklintempleton.com jpmorgan.com fidelity.com \
-         finance.yahoo.com reuters.com cnbc.com bloomberg.com wsj.com marketwatch.com barrons.com \
-         federalreserve.gov treasury.gov bls.gov eia.gov sec.gov \
-         stockanalysis.com etf.com morningstar.com etfdb.com; do
-  ALLOWED+=("WebFetch(domain:$d)")
-done
+DISALLOWED=(WebFetch)
 
 cd "$REPO" || exit 1
 echo "== etf-analyst run started $(date)" >"$LOG"
 
 claude -p "Run your full workflow: screen the US ETF market with the latest prices, rank ETFs for long-term and short-term investing with explanations, and publish the report as a PDF per Step 5. Return the PDF path first, then the full report." \
   --agent etf-analyst \
-  --allowedTools "${ALLOWED[@]}" \
+  --allowedTools "${ALLOWED[@]}" --disallowedTools "${DISALLOWED[@]}" \
   >>"$LOG" 2>&1
 STATUS=$?
 
@@ -69,7 +65,7 @@ MD="${PDF%.pdf}.md"
 echo "== verifier started $(date)" >>"$LOG"
 VERDICT=$(claude -p "Verify the ETF report at $MD and publish the verification PDF per Step 8." \
   --agent etf-report-verifier \
-  --allowedTools "${ALLOWED[@]}" \
+  --allowedTools "${ALLOWED[@]}" --disallowedTools "${DISALLOWED[@]}" \
   2>>"$LOG")
 echo "$VERDICT" >>"$LOG"
 SCORE=$(grep -oE 'CONFIDENCE: [0-9]+/100' <<<"$VERDICT" | tail -1 | grep -oE '[0-9]+/100')

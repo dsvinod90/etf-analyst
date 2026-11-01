@@ -85,10 +85,20 @@ def tables(md):
             i += 1
 
 
+def in_dir(path, base, suffix, what):
+    """Resolve PATH and refuse anything outside BASE (reports are written by an agent that reads the web)."""
+    p = Path(path).expanduser().resolve()
+    if not p.is_relative_to(base) or p.suffix != suffix:
+        sys.exit(f"{what} must be a {suffix} file inside {base}")
+    return p
+
+
 def find_data_file(report_path, md):
     m = re.search(r"Data file:\**\s*`?([^\s`]+\.json)", md)
-    if m and Path(m[1]).expanduser().exists():
-        return Path(m[1]).expanduser()
+    if m:
+        p = Path(m[1]).expanduser().resolve()
+        if p.is_relative_to(DATA_DIR.resolve()) and p.exists():
+            return p
     older = [p for p in DATA_DIR.glob("etf-data-*.json") if p.stat().st_mtime <= report_path.stat().st_mtime]
     return max(older, key=lambda p: p.stat().st_mtime) if older else None
 
@@ -107,6 +117,9 @@ def main():
     ap.add_argument("report", type=Path)
     ap.add_argument("--data", type=Path)
     args = ap.parse_args()
+    args.report = in_dir(args.report, (REPO / "reports").resolve(), ".md", "report")
+    if args.data:
+        args.data = in_dir(args.data, DATA_DIR.resolve(), ".json", "data file")
     md = args.report.read_text()
 
     data_path = args.data or find_data_file(args.report, md)
