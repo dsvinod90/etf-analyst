@@ -178,12 +178,19 @@ def md_to_body(md_text):
     return sanitize(body)
 
 
-def verification_parts(verification_md):
-    """Badge HTML for under the report's title, and the verification body for the appendix."""
+def label_for(score):
+    return "High" if score >= 90 else "Good" if score >= 75 else "Use with caution" if score >= 60 else "Unreliable"
+
+
+def verification_parts(verification_md, confidence=None):
+    """Badge HTML for under the report's title, and the verification body for the appendix.
+
+    CONFIDENCE, when given, is the score after run-report.sh's own checks and overrides the one in the text."""
     badge = ""
     m = CONFIDENCE.search(verification_md)
-    if m:
-        score, label = m[1], m[2].strip()
+    if m or confidence is not None:
+        score = confidence if confidence is not None else int(m[1])
+        label = label_for(score)
         badge = (f'<div class="badge {LEVELS.get(label.lower(), "good")}">'
                  f'<b>Verified · Confidence {score}/100 · {html.escape(label)}</b>'
                  f'<span>Independent check of every number, the key news claims and the reasoning: '
@@ -197,10 +204,10 @@ CSP = ("default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.c
        "font-src https://fonts.gstatic.com; img-src data:")
 
 
-def build_html(report_md, title, verification_md=None):
+def build_html(report_md, title, verification_md=None, confidence=None):
     body = md_to_body(report_md)
     if verification_md:
-        badge, appendix = verification_parts(verification_md)
+        badge, appendix = verification_parts(verification_md, confidence)
         body = re.sub(r"(</h1>)", lambda m: m[1] + badge, body, count=1)
         body += f'<div class="appendix"></div>{appendix}'
     return (f"<!doctype html><html><head><meta charset='utf-8'>"
@@ -234,6 +241,8 @@ def main():
     ap.add_argument("-o", "--out", type=Path)
     ap.add_argument("--verification", type=Path,
                     help="verification report to show as a confidence badge + appendix")
+    ap.add_argument("--confidence", type=int, choices=range(0, 101), metavar="0-100",
+                    help="score to show on the badge (overrides the one in the verification text)")
     args = ap.parse_args()
     report = in_reports(args.report, ".md", "report")
     out = in_reports(args.out or report.with_suffix(".pdf"), ".pdf", "output")
@@ -241,7 +250,7 @@ def main():
 
     with tempfile.TemporaryDirectory() as tmp:
         page = Path(tmp) / "report.html"
-        page.write_text(build_html(report.read_text(), report.stem, verification))
+        page.write_text(build_html(report.read_text(), report.stem, verification, args.confidence))
         subprocess.run([find_chrome(), "--headless", "--disable-gpu", "--no-pdf-header-footer",
                         "--virtual-time-budget=10000",  # let web fonts load before printing
                         f"--print-to-pdf={out}", page.as_uri()],

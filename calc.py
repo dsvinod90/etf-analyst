@@ -37,7 +37,10 @@ def evaluate(node):
         return checked(OPS[type(node.op)](evaluate(node.operand)))
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in FUNCS
             and not node.keywords):
-        return checked(FUNCS[node.func.id](*[evaluate(a) for a in node.args]))
+        args = [evaluate(a) for a in node.args]
+        if node.func.id == "round" and len(args) == 2 and not (isinstance(args[1], int) and 0 <= args[1] <= 10):
+            raise ValueError("round() digits must be a whole number from 0 to 10")  # big negative ndigits is costly
+        return checked(FUNCS[node.func.id](*args))
     raise ValueError(f"not allowed: {ast.dump(node)[:60]}")
 
 

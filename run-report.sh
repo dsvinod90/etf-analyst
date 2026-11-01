@@ -30,11 +30,11 @@ notify() {
 # The agents read web search results, which could contain injected instructions, so:
 #  - Bash may run only this project's own scripts (no `python3 -c`, no other commands);
 #    the scripts themselves refuse file paths outside reports/
-#  - files may be read only inside the repo and written only under reports/
+#  - files may be read and written only under reports/ (nothing else is worth leaking)
 #  - WebFetch is removed entirely, so nothing can be sent out encoded in a URL;
 #    research uses WebSearch results only
 SCRIPTS=(fetch_etf_data.py make_pdf.py verify_tables.py calc.py)
-ALLOWED=(WebSearch "Read(~/Dev/etf-analyst/**)" "Edit(~/Dev/etf-analyst/reports/**)")
+ALLOWED=(WebSearch "Read(~/Dev/etf-analyst/reports/**)" "Edit(~/Dev/etf-analyst/reports/**)")
 for s in "${SCRIPTS[@]}"; do
   ALLOWED+=("Bash(python3 ~/Dev/etf-analyst/$s:*)" "Bash(python3 $REPO/$s:*)")
 done
@@ -71,15 +71,27 @@ echo "$VERDICT" >>"$LOG"
 SCORE=$(grep -oE 'CONFIDENCE: [0-9]+/100' <<<"$VERDICT" | tail -1 | grep -oE '[0-9]+/100')
 echo "== verifier finished $(date), confidence: ${SCORE:-unknown}" >>"$LOG"
 
+# The verifier reads the (untrusted) report, so injected text could inflate its score.
+# Re-check the table numbers here, in code, and cap the score if they don't hold up.
+ACCURACY=$(python3 "$REPO/verify_tables.py" "$MD" 2>>"$LOG" \
+  | python3 -c 'import json, sys; print(json.load(sys.stdin).get("numeric_accuracy_pct") or 0)' 2>>"$LOG")
+CAP_NOTE=""
+if [[ -n "$SCORE" ]] && python3 -c 'import sys; sys.exit(0 if float(sys.argv[1] or 0) < 98 else 1)' "${ACCURACY:-0}" \
+   && (( ${SCORE%/100} > 74 )); then
+  CAP_NOTE=" (capped: table numbers ${ACCURACY:-?}% accurate)"
+  SCORE="74/100"
+fi
+echo "== table accuracy ${ACCURACY:-unknown}%, final confidence ${SCORE:-unknown}${CAP_NOTE}" >>"$LOG"
+
 VERIFICATION="${MD%.md}-verification.md"
 if [[ -n "$SCORE" && -f "$VERIFICATION" ]]; then
   # rebuild the report PDF with a confidence badge and the verification as an appendix
-  python3 "$REPO/make_pdf.py" "$MD" --verification "$VERIFICATION" -o "$PDF" >>"$LOG" 2>&1 \
+  python3 "$REPO/make_pdf.py" "$MD" --verification "$VERIFICATION" --confidence "${SCORE%/100}" -o "$PDF" >>"$LOG" 2>&1 \
     || echo "== could not add verification to the report PDF" >>"$LOG"
 fi
 
 if [[ -n "$SCORE" ]]; then
-  notify "Report ready · Confidence $SCORE" "Click to open $(basename "$PDF")" "$PDF"
+  notify "Report ready · Confidence $SCORE" "Click to open $(basename "$PDF")${CAP_NOTE}" "$PDF"
 else
   notify "Report ready · verification failed" "Click to open $(basename "$PDF")" "$PDF"
 fi
