@@ -1,5 +1,0 @@
-[console_scripts]
-etf-calc = etf_analyst.safe_calc:main
-etf-pdf = etf_analyst.pdf:main
-etf-screen = etf_analyst.screen:main
-etf-verify = etf_analyst.verify:main

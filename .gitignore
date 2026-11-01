@@ -10,3 +10,6 @@ reports/
 .pytest_cache/
 .ruff_cache/
 .coverage
+*.egg-info/
+build/
+dist/
