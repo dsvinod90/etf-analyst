@@ -180,6 +180,12 @@ scanning alert; each has a test in `tests/`. Don't regress them.
 
 ## Workflow
 
+- **Every repo change updates the agent files in the same commit.** If you change a command,
+  path, option, output field, metric, score, permission in `run-report.sh`, or anything else
+  the agents rely on, update `.claude/agents/etf-analyst.md` and
+  `.claude/agents/etf-report-verifier.md` to match. Re-read both files in full before
+  committing; don't just search for command names. Stale statements (what the agents may
+  read, which tools exist) mislead them as much as wrong paths.
 - Before committing: `make check` passes. For changes to commands the agents call, also run
   `./run-report.sh` once and confirm the log ends with a confidence score.
 - After changing `pyproject.toml` (dependencies, commands), rerun `make venv`.
