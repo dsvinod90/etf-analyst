@@ -1,0 +1,11 @@
+# ETF watchlist — one ticker per line (comments allowed)
+JEPI
+VTI
+VOO
+VXUS
+SCHD
+QQQ
+QQQM
+VUG
+SPY
+VT
