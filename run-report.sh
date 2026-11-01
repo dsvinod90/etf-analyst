@@ -41,5 +41,27 @@ if [[ $STATUS -ne 0 || -z "$PDF" ]]; then
   exit 1
 fi
 
-notify "Report ready" "Click to open $(basename "$PDF")" "$PDF"
+# independent check of the report: numbers vs raw data, news claims, reasoning
+MD="${PDF%.pdf}.md"
+echo "== verifier started $(date)" >>"$LOG"
+VERDICT=$(claude -p "Verify the ETF report at $MD and publish the verification PDF per Step 8." \
+  --agent etf-report-verifier \
+  --allowedTools "Bash(python3:*)" "Bash(ls:*)" Read Write WebSearch WebFetch \
+  2>>"$LOG")
+echo "$VERDICT" >>"$LOG"
+SCORE=$(grep -oE 'CONFIDENCE: [0-9]+/100' <<<"$VERDICT" | tail -1 | grep -oE '[0-9]+/100')
+echo "== verifier finished $(date), confidence: ${SCORE:-unknown}" >>"$LOG"
+
+VERIFICATION="${MD%.md}-verification.md"
+if [[ -n "$SCORE" && -f "$VERIFICATION" ]]; then
+  # rebuild the report PDF with a confidence badge and the verification as an appendix
+  python3 "$REPO/make_pdf.py" "$MD" --verification "$VERIFICATION" -o "$PDF" >>"$LOG" 2>&1 \
+    || echo "== could not add verification to the report PDF" >>"$LOG"
+fi
+
+if [[ -n "$SCORE" ]]; then
+  notify "Report ready · Confidence $SCORE" "Click to open $(basename "$PDF")" "$PDF"
+else
+  notify "Report ready · verification failed" "Click to open $(basename "$PDF")" "$PDF"
+fi
 echo "$PDF"

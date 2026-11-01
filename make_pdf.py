@@ -66,14 +66,23 @@ td:first-child, td.ticker { font-weight: 600; color: var(--navy); }
 blockquote { margin: 10pt 0 14pt; padding: 9pt 13pt; border-radius: 7pt; background: var(--note-bg);
              border-left: 4pt solid var(--note-line); font-size: 9pt; }
 blockquote li { break-inside: avoid; }
-blockquote p:first-child { margin-top: 0; color: #8a5a00; text-transform: uppercase; font-size: 8pt;
-                           letter-spacing: 0.06em; }
+blockquote p:first-child { margin-top: 0; }
+blockquote p.label { color: #8a5a00; text-transform: uppercase; font-size: 8pt; letter-spacing: 0.06em; }
 blockquote strong { color: #6b4500; }
 blockquote ul { margin: 4pt 0 0; }
 
 code { font-size: 8.6pt; background: #eef2f6; padding: 1pt 3pt; border-radius: 3pt; }
 hr { border: none; border-top: 1px solid var(--line); margin: 16pt 0; }
 h2 + ul, h2 + p { margin-top: 6pt; }
+
+.badge { margin: -4pt 0 14pt; padding: 9pt 13pt; border-radius: 8pt; border: 1px solid; font-size: 9pt; }
+.badge b { display: block; font-size: 11pt; margin-bottom: 2pt; }
+.badge.high    { background: #e8f6ee; border-color: #9fd8b5; color: #0a5c2c; }
+.badge.good    { background: #e9f1fa; border-color: #a9c6e6; color: #164a7a; }
+.badge.caution { background: #fff5e0; border-color: #f0c674; color: #7a4d00; }
+.badge.low     { background: #fdecea; border-color: #f0a8a0; color: #8c1d12; }
+.appendix { break-before: page; }
+.appendix + h1 { background: linear-gradient(120deg, #3b4656 0%, #5b6676 100%); font-size: 18pt; }
 """
 
 # colour signed numbers in table cells: +12.3% green, -4.5% / −4.5% red
@@ -85,19 +94,38 @@ TICKER = re.compile(r"<td([^>]*)>(\s*[A-Z]{2,5}\s*)</td>")
 
 def colour_numbers(body):
     body = TICKER.sub(r'<td class="ticker"\1>\2</td>', body)  # bold ticker symbols in any column
+    body = re.sub(r"<p><strong>(How to read[^<]*)</strong></p>", r'<p class="label"><strong>\1</strong></p>', body)
     return SIGNED.sub(lambda m: f'{m[1]}<span class="{"pos" if m[2][0] == "+" else "neg"}">{m[2]}</span>', body)
 
 
-def md_to_html(md_path, title):
+CONFIDENCE = re.compile(r"Confidence:\s*(\d+)\s*/\s*100\s*[—–-]\s*(High|Good|Use with caution|Unreliable)", re.I)
+LEVELS = {"high": "high", "good": "good", "use with caution": "caution", "unreliable": "low"}
+
+
+def with_verification(report_md, verification_md):
+    """Badge under the report's title + the verification appended as a final appendix."""
+    m = CONFIDENCE.search(verification_md)
+    if m:
+        score, label = m[1], m[2].strip()
+        badge = (f'<div class="badge {LEVELS.get(label.lower(), "good")}">'
+                 f'<b>Verified · Confidence {score}/100 · {html.escape(label)}</b>'
+                 f'<span>Independent check of every number, the key news claims and the reasoning: '
+                 f'see the Verification appendix at the end.</span></div>\n')
+        report_md = re.sub(r"^(# .*\n)", lambda t: t[1] + "\n" + badge + "\n", report_md, count=1, flags=re.M)
+    appendix = re.sub(r"^# (.*)$", r"# Appendix: \1", verification_md, count=1, flags=re.M)
+    return f'{report_md}\n\n<div class="appendix"></div>\n\n{appendix}'
+
+
+def md_to_html(md_text, title):
     if shutil.which("pandoc"):
-        body = subprocess.run(["pandoc", "-f", "gfm", "-t", "html", str(md_path)],
+        body = subprocess.run(["pandoc", "-f", "gfm", "-t", "html"], input=md_text,
                               check=True, capture_output=True, text=True).stdout
     else:
         try:
             import markdown
         except ImportError:
             sys.exit("Need pandoc (brew install pandoc) or the Python 'markdown' package.")
-        body = markdown.markdown(md_path.read_text(), extensions=["tables", "sane_lists"])
+        body = markdown.markdown(md_text, extensions=["tables", "sane_lists"])
     return (f"<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(title)}</title>"
             f"<link rel='stylesheet' href='{FONTS}'><style>{CSS}</style></head>"
             f"<body>{colour_numbers(body)}</body></html>")
@@ -117,12 +145,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("report", type=Path)
     ap.add_argument("-o", "--out", type=Path)
+    ap.add_argument("--verification", type=Path,
+                    help="verification report to show as a confidence badge + appendix")
     args = ap.parse_args()
     out = (args.out or args.report.with_suffix(".pdf")).resolve()
+    md = args.report.read_text()
+    if args.verification:
+        md = with_verification(md, args.verification.read_text())
 
     with tempfile.TemporaryDirectory() as tmp:
         page = Path(tmp) / "report.html"
-        page.write_text(md_to_html(args.report, args.report.stem))
+        page.write_text(md_to_html(md, args.report.stem))
         # CI runners (Linux) can't use Chrome's sandbox
         sandbox = ["--no-sandbox"] if sys.platform.startswith("linux") else []
         subprocess.run([find_chrome(), "--headless", "--disable-gpu", "--no-pdf-header-footer", *sandbox,

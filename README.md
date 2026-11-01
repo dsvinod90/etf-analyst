@@ -9,7 +9,12 @@ A Claude Code agent that scans the US ETF market with live prices, ranks ETFs fo
    - **Long-term:** 5y/10y CAGR, Sharpe ratio, max drawdown, expense ratio, fund size.
    - **Short-term:** 1m/3m/6m momentum, trend vs 200-day average, volatility; overbought funds penalized.
 3. The agent researches the top picks, groups duplicates (e.g. VOO/IVV/SPY), and writes a report explaining why each pick fits each horizon.
-4. The report is saved to `reports/etf-report-<date>.md` and published as `reports/etf-report-<date>.pdf` by `make_pdf.py`. The `reports/` folder is git-ignored.
+4. The report is saved to `reports/etf-report-<date>.md` and published as `reports/etf-report-<date>.pdf` by `make_pdf.py`. The raw data it was built from is saved to `reports/data/`. The `reports/` folder is git-ignored.
+5. A second agent, **etf-report-verifier**, checks the report independently and gives it a 0–100 confidence score:
+   - `verify_tables.py` compares every number in the report's tables with the saved raw data.
+   - The agent checks numbers and arithmetic in the prose, fact-checks the main news claims with web search, reviews whether the conclusions follow from the data, and checks completeness.
+   - Scoring: data accuracy 40, factual claims 25, reasoning 20, completeness 15. An error that would change a recommendation caps the score at 74.
+   - Output: `reports/etf-report-<date>-verification.md` and `.pdf`.
 
 No API key needed. The data script uses only the Python 3 standard library. The PDF step needs Google Chrome plus either `pandoc` (`brew install pandoc`) or the Python `markdown` package.
 
@@ -18,13 +23,14 @@ No API key needed. The data script uses only the Python 3 standard library. The 
 ```sh
 git clone <this repo> ~/Dev/etf-analyst
 ln -s ~/Dev/etf-analyst/.claude/agents/etf-analyst.md ~/.claude/agents/etf-analyst.md
+ln -s ~/Dev/etf-analyst/.claude/agents/etf-report-verifier.md ~/.claude/agents/etf-report-verifier.md
 ```
 
-The symlink makes the agent available in every Claude Code session. The agent runs the script from `~/Dev/etf-analyst/`; if you clone somewhere else, update the path in `.claude/agents/etf-analyst.md`.
+The symlinks make the agents available in every Claude Code session. The agent runs the script from `~/Dev/etf-analyst/`; if you clone somewhere else, update the path in `.claude/agents/etf-analyst.md`.
 
 ## Usage
 
-In Claude Code: *"Run the etf-analyst"*, *"Which ETFs are good for long-term investing right now?"*, or *"Compare VOO, QQQM and SCHD."*
+In Claude Code: *"Run the etf-analyst"*, *"Which ETFs are good for long-term investing right now?"*, or *"Compare VOO, QQQM and SCHD."* To check a report: *"Run the etf-report-verifier on the latest report."*
 
 Run the script directly:
 
@@ -32,12 +38,14 @@ Run the script directly:
 ./fetch_etf_data.py                # screen the market, top 15 per horizon
 ./fetch_etf_data.py --top 25       # longer lists
 ./fetch_etf_data.py VOO QQQM SCHD  # rank only these tickers
+./fetch_etf_data.py --save         # also save full data to reports/data/
 ./make_pdf.py reports/etf-report-2026-10-30.md   # Markdown report -> PDF
+./verify_tables.py reports/etf-report-2026-10-30.md  # check table numbers against saved data
 ```
 
 ## Daily run on your Mac
 
-`launchd/com.dsvinod90.etf-analyst.plist` is a macOS launchd job that runs `run-report.sh` every day at 8:00 AM (Mac local time; America/New_York here). The script runs the agent headless with Claude Code, writes the report to `reports/`, logs to `reports/logs/`, and shows a Mac notification when the PDF is ready. If the Mac is asleep at 8:00 the job runs at the next wake; if it's shut down, that day is skipped.
+`launchd/com.dsvinod90.etf-analyst.plist` is a macOS launchd job that runs `run-report.sh` every day at 8:00 AM (Mac local time; America/New_York here). The script runs the analyst agent headless with Claude Code, then the verifier agent. It writes both reports to `reports/`, logs to `reports/logs/`, and shows a Mac notification with the confidence score (e.g. "Report ready · Confidence 91/100"). Clicking the notification opens the report. If the Mac is asleep at 8:00 the job runs at the next wake; if it's shut down, that day is skipped.
 
 ```sh
 # install / enable

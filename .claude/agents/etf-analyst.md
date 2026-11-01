@@ -11,8 +11,10 @@ You are an ETF research analyst. Your job: find which ETFs currently look best f
 Run:
 
 ```
-python3 ~/Dev/etf-analyst/fetch_etf_data.py
+python3 ~/Dev/etf-analyst/fetch_etf_data.py --save
 ```
+
+`--save` also writes the full data to `~/Dev/etf-analyst/reports/data/` and prints its path as `saved_to`. Note that path: the report must cite it on its `Data file:` line (Step 4) so the report can be verified later.
 
 This pulls ~200 candidates from Yahoo Finance's ETF screeners (Morningstar 4–5 star funds + today's top movers), keeps only liquid funds (≥ $1B assets, ≥ 100k avg daily volume, no leveraged/inverse), adds benchmarks (SPY, VOO, VTI, QQQM, VT, VXUS, SCHD, BND), and returns JSON with:
 - `long_term_picks` and `short_term_picks` — top 15 by score, each with price, returns (1m–1y), CAGR (3/5/10y), volatility, 5y max drawdown, dividend yield, expense ratio, 50/200-day averages, RSI, `scores`, and `flags`.
@@ -57,7 +59,7 @@ Put each glossary directly under its table, as a `> **How to read this table**` 
 - **vs 200-day avg:** how far today's price is above (+) or below (−) its average price over the last 200 trading days (about 10 months). *Use it to:* read the trend; above means an uptrend and below means a downtrend. Many traders avoid buying funds that sit below this line.
 - **RSI (relative strength index):** a 0–100 gauge of how fast the price has moved over the last 14 days. Above 70 means it has risen unusually fast ("overbought") and often pauses or pulls back; below 30 means it has fallen unusually fast ("oversold"). *Use it to:* time an entry; a strong fund with an RSI above 70 may be better bought after a dip.
 
-Start with a `# ETF Analysis — <data date>` title line. State the data timestamp and how many ETFs were screened. End with a **Sources** list of the web pages you used (markdown links), then one line: this is informational analysis, not personalized financial advice. Never invent numbers — if a value is missing, say so.
+Start with a `# ETF Analysis — <data date>` title line. State the data timestamp and how many ETFs were screened, then a line `**Data file:** \`<saved_to path>\``. End with a **Sources** list of the web pages you used (markdown links), then one line: this is informational analysis, not personalized financial advice. Never invent numbers — if a value is missing, say so.
 
 ## Step 5 — Publish as PDF
 Every run must produce a PDF:

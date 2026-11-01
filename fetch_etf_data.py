@@ -16,6 +16,7 @@ import sys
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from pathlib import Path
 
 SCREENER_URL = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds={s}&count=250"
 CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{t}?range=10y&interval=1d&events=div"
@@ -28,6 +29,7 @@ MIN_AVG_VOLUME = 100_000
 EXCLUDE_NAME = re.compile(
     r"\b(2x|3x|-1x|-2x|-3x|ultra|ultrapro|bull|bear|inverse|leveraged|daily)\b|\bshort\b(?![- ](term|duration|maturity))",
     re.I)
+SAVE_DIR = Path(__file__).resolve().parent / "reports" / "data"
 RISK_FREE_PCT = 4.0  # approx. cash/T-bill yield used for the Sharpe ratio
 TRADING_DAYS = 252
 YEAR = 365.25 * 86400
@@ -211,6 +213,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("tickers", nargs="*", help="analyze only these (comma or space separated)")
     ap.add_argument("--top", type=int, default=15, help="picks per horizon")
+    ap.add_argument("--save", action="store_true",
+                    help="also save the full data (every fund analyzed) to reports/data/ for verification")
     args = ap.parse_args()
 
     out = {"generated_at": datetime.now(timezone.utc).isoformat(), "errors": {}}
@@ -241,6 +245,12 @@ def main():
     out["short_term_picks"] = sorted(etfs, key=lambda e: -e["scores"]["short_term"])[:args.top]
     picked = {e["ticker"] for e in out["long_term_picks"] + out["short_term_picks"]}
     out["benchmarks"] = [e for e in etfs if e["ticker"] in BENCHMARKS and e["ticker"] not in picked]
+    if args.save:
+        # full record of every fund analyzed, so a report can be verified against it later
+        SAVE_DIR.mkdir(parents=True, exist_ok=True)
+        path = SAVE_DIR / f"etf-data-{datetime.now().strftime('%Y-%m-%d-%H%M%S')}.json"
+        out["saved_to"] = str(path)
+        path.write_text(json.dumps({**out, "all_etfs": etfs}, indent=2))
     json.dump(out, sys.stdout, indent=2)
     print()
 
