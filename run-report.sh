@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run the etf-analyst agent headless, publish the PDF, and show a Mac notification.
+# Run the etf-analyst agent headless, verify its report, publish the PDF, and show a Mac notification.
 # Run by the daily launchd job; also run it by hand any time:  ./run-report.sh
 set -uo pipefail
 
@@ -13,26 +13,49 @@ LOG="$LOGS/run-$(date +%Y-%m-%d-%H%M).log"
 START_MARKER="$LOGS/.run-start"
 touch "$START_MARKER"
 
-# notify SUBTITLE MESSAGE FILE -- clicking the notification opens FILE
-# (terminal-notifier; falls back to a plain, non-clickable osascript notification)
+# notify SUBTITLE MESSAGE FILE -- clicking the notification opens FILE.
+# Text and paths are passed as arguments, never spliced into shell or AppleScript code.
 notify() {
+  local url
+  url=$(python3 -c 'import pathlib, sys; print(pathlib.Path(sys.argv[1]).resolve().as_uri())' "$3")
   terminal-notifier -title "ETF Analyst" -subtitle "$1" -message "$2" \
-    -execute "open '$3'" -group etf-analyst -sound default >/dev/null 2>&1 \
-    || osascript -e "display notification \"$2\" with title \"ETF Analyst\" subtitle \"$1\"" 2>/dev/null \
+    -open "$url" -group etf-analyst -sound default >/dev/null 2>&1 \
+    || osascript -e 'on run argv' \
+                 -e 'display notification (item 2 of argv) with title "ETF Analyst" subtitle (item 1 of argv)' \
+                 -e 'end run' "$1" "$2" 2>/dev/null \
     || true
 }
+
+# What the unattended agents may do without asking. Anything else is denied.
+# The agents read web pages, which could contain injected instructions, so:
+#  - Bash may run only this project's own scripts (no `python3 -c`, no other commands)
+#  - files may be read only inside the repo and written only under reports/
+#  - pages may be fetched only from these financial sites (blocks sending data elsewhere)
+SCRIPTS=(fetch_etf_data.py make_pdf.py verify_tables.py calc.py)
+ALLOWED=(WebSearch "Read(~/Dev/etf-analyst/**)" "Edit(~/Dev/etf-analyst/reports/**)" "Bash(ls ~/Dev/etf-analyst/reports:*)")
+for s in "${SCRIPTS[@]}"; do
+  ALLOWED+=("Bash(python3 ~/Dev/etf-analyst/$s:*)" "Bash(python3 $REPO/$s:*)")
+done
+for d in vanguard.com investor.vanguard.com schwab.com schwabassetmanagement.com ishares.com ssga.com \
+         invesco.com ftportfolios.com franklintempleton.com jpmorgan.com fidelity.com \
+         finance.yahoo.com reuters.com cnbc.com bloomberg.com wsj.com marketwatch.com barrons.com \
+         federalreserve.gov treasury.gov bls.gov eia.gov sec.gov \
+         stockanalysis.com etf.com morningstar.com etfdb.com; do
+  ALLOWED+=("WebFetch(domain:$d)")
+done
 
 cd "$REPO" || exit 1
 echo "== etf-analyst run started $(date)" >"$LOG"
 
 claude -p "Run your full workflow: screen the US ETF market with the latest prices, rank ETFs for long-term and short-term investing with explanations, and publish the report as a PDF per Step 5. Return the PDF path first, then the full report." \
   --agent etf-analyst \
-  --allowedTools "Bash(python3:*)" "Bash(ls:*)" "Bash(date:*)" Read Write WebSearch WebFetch \
+  --allowedTools "${ALLOWED[@]}" \
   >>"$LOG" 2>&1
 STATUS=$?
 
-# newest PDF written during this run
-PDF=$(find "$REPORTS" -maxdepth 1 -name 'etf-report-*.pdf' -newer "$START_MARKER" -print 2>/dev/null | sort | tail -1)
+# newest PDF written during this run (only names the analyst itself produces)
+PDF=$(find "$REPORTS" -maxdepth 1 -newer "$START_MARKER" -print 2>/dev/null \
+      | grep -E '/etf-report-[0-9]{4}-[0-9]{2}-[0-9]{2}(-[0-9]{4})?\.pdf$' | sort | tail -1)
 echo "== agent finished $(date), exit $STATUS, pdf: ${PDF:-none}" >>"$LOG"
 
 if [[ $STATUS -ne 0 || -z "$PDF" ]]; then
@@ -46,7 +69,7 @@ MD="${PDF%.pdf}.md"
 echo "== verifier started $(date)" >>"$LOG"
 VERDICT=$(claude -p "Verify the ETF report at $MD and publish the verification PDF per Step 8." \
   --agent etf-report-verifier \
-  --allowedTools "Bash(python3:*)" "Bash(ls:*)" Read Write WebSearch WebFetch \
+  --allowedTools "${ALLOWED[@]}" \
   2>>"$LOG")
 echo "$VERDICT" >>"$LOG"
 SCORE=$(grep -oE 'CONFIDENCE: [0-9]+/100' <<<"$VERDICT" | tail -1 | grep -oE '[0-9]+/100')

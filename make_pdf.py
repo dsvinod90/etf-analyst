@@ -7,6 +7,7 @@ Usage: make_pdf.py REPORT.md [-o OUT.pdf]   (default: same name, .pdf)
 """
 import argparse
 import html
+from html.parser import HTMLParser
 import re
 import shutil
 import subprocess
@@ -102,21 +103,67 @@ CONFIDENCE = re.compile(r"Confidence:\s*(\d+)\s*/\s*100\s*[—–-]\s*(High|Good
 LEVELS = {"high": "high", "good": "good", "use with caution": "caution", "unreliable": "low"}
 
 
-def with_verification(report_md, verification_md):
-    """Badge under the report's title + the verification appended as a final appendix."""
-    m = CONFIDENCE.search(verification_md)
-    if m:
-        score, label = m[1], m[2].strip()
-        badge = (f'<div class="badge {LEVELS.get(label.lower(), "good")}">'
-                 f'<b>Verified · Confidence {score}/100 · {html.escape(label)}</b>'
-                 f'<span>Independent check of every number, the key news claims and the reasoning: '
-                 f'see the Verification appendix at the end.</span></div>\n')
-        report_md = re.sub(r"^(# .*\n)", lambda t: t[1] + "\n" + badge + "\n", report_md, count=1, flags=re.M)
-    appendix = re.sub(r"^# (.*)$", r"# Appendix: \1", verification_md, count=1, flags=re.M)
-    return f'{report_md}\n\n<div class="appendix"></div>\n\n{appendix}'
+ALLOWED_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6", "p", "br", "hr", "ul", "ol", "li", "blockquote",
+                "table", "thead", "tbody", "tr", "th", "td", "strong", "b", "em", "i", "code", "pre",
+                "a", "del", "sup", "sub", "span", "colgroup", "col"}
+ALLOWED_ATTRS = {"id", "class", "style", "href", "colspan", "rowspan", "start", "width"}
 
 
-def md_to_html(md_text, title):
+class Sanitizer(HTMLParser):
+    """Rebuild HTML keeping only formatting tags; anything else (scripts, images, iframes...) is escaped.
+
+    Reports are written by an agent that reads web pages, so they're treated as untrusted."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.out = []
+
+    def _attrs(self, attrs):
+        keep = []
+        for k, v in attrs:
+            v = v or ""
+            if k not in ALLOWED_ATTRS:
+                continue
+            if k == "href" and not re.match(r"^(https?:|#)", v.strip(), re.I):
+                continue  # no javascript:, data:, file: links
+            if k == "style" and not re.fullmatch(r"\s*(text-align|width):\s*[\w.%\s-]+;?\s*", v):
+                continue
+            keep.append(f' {k}="{html.escape(v)}"')
+        return "".join(keep)
+
+    def handle_starttag(self, tag, attrs):
+        self.out.append(f"<{tag}{self._attrs(attrs)}>" if tag in ALLOWED_TAGS
+                        else html.escape(self.get_starttag_text()))
+
+    def handle_startendtag(self, tag, attrs):
+        self.out.append(f"<{tag}{self._attrs(attrs)} />" if tag in ALLOWED_TAGS
+                        else html.escape(self.get_starttag_text()))
+
+    def handle_endtag(self, tag):
+        self.out.append(f"</{tag}>" if tag in ALLOWED_TAGS else html.escape(f"</{tag}>"))
+
+    def handle_data(self, data):
+        self.out.append(html.escape(data, quote=False))
+
+    def handle_entityref(self, name):
+        self.out.append(f"&{name};")
+
+    def handle_charref(self, name):
+        self.out.append(f"&#{name};")
+
+    def handle_comment(self, data):
+        pass
+
+
+def sanitize(body):
+    s = Sanitizer()
+    s.feed(body)
+    s.close()
+    return "".join(s.out)
+
+
+def md_to_body(md_text):
+    """Markdown -> sanitized HTML body (raw HTML in the Markdown never reaches Chrome as markup)."""
     if shutil.which("pandoc"):
         body = subprocess.run(["pandoc", "-f", "gfm", "-t", "html"], input=md_text,
                               check=True, capture_output=True, text=True).stdout
@@ -126,7 +173,37 @@ def md_to_html(md_text, title):
         except ImportError:
             sys.exit("Need pandoc (brew install pandoc) or the Python 'markdown' package.")
         body = markdown.markdown(md_text, extensions=["tables", "sane_lists"])
-    return (f"<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(title)}</title>"
+    return sanitize(body)
+
+
+def verification_parts(verification_md):
+    """Badge HTML for under the report's title, and the verification body for the appendix."""
+    badge = ""
+    m = CONFIDENCE.search(verification_md)
+    if m:
+        score, label = m[1], m[2].strip()
+        badge = (f'<div class="badge {LEVELS.get(label.lower(), "good")}">'
+                 f'<b>Verified · Confidence {score}/100 · {html.escape(label)}</b>'
+                 f'<span>Independent check of every number, the key news claims and the reasoning: '
+                 f'see the Verification appendix at the end.</span></div>')
+    appendix = re.sub(r"^# (.*)$", r"# Appendix: \1", verification_md, count=1, flags=re.M)
+    return badge, md_to_body(appendix)
+
+
+# No scripts, no network except the fonts: a report can't make Chrome run code or call other hosts
+CSP = ("default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; "
+       "font-src https://fonts.gstatic.com; img-src data:")
+
+
+def build_html(report_md, title, verification_md=None):
+    body = md_to_body(report_md)
+    if verification_md:
+        badge, appendix = verification_parts(verification_md)
+        body = re.sub(r"(</h1>)", lambda m: m[1] + badge, body, count=1)
+        body += f'<div class="appendix"></div>{appendix}'
+    return (f"<!doctype html><html><head><meta charset='utf-8'>"
+            f"<meta http-equiv='Content-Security-Policy' content=\"{CSP}\">"
+            f"<title>{html.escape(title)}</title>"
             f"<link rel='stylesheet' href='{FONTS}'><style>{CSS}</style></head>"
             f"<body>{colour_numbers(body)}</body></html>")
 
@@ -149,16 +226,12 @@ def main():
                     help="verification report to show as a confidence badge + appendix")
     args = ap.parse_args()
     out = (args.out or args.report.with_suffix(".pdf")).resolve()
-    md = args.report.read_text()
-    if args.verification:
-        md = with_verification(md, args.verification.read_text())
+    verification = args.verification.read_text() if args.verification else None
 
     with tempfile.TemporaryDirectory() as tmp:
         page = Path(tmp) / "report.html"
-        page.write_text(md_to_html(md, args.report.stem))
-        # CI runners (Linux) can't use Chrome's sandbox
-        sandbox = ["--no-sandbox"] if sys.platform.startswith("linux") else []
-        subprocess.run([find_chrome(), "--headless", "--disable-gpu", "--no-pdf-header-footer", *sandbox,
+        page.write_text(build_html(args.report.read_text(), args.report.stem, verification))
+        subprocess.run([find_chrome(), "--headless", "--disable-gpu", "--no-pdf-header-footer",
                         "--virtual-time-budget=10000",  # let web fonts load before printing
                         f"--print-to-pdf={out}", page.as_uri()],
                        check=True, capture_output=True)

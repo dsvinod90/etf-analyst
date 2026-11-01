@@ -13,6 +13,7 @@ import json
 import math
 import re
 import sys
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -32,6 +33,7 @@ EXCLUDE_NAME = re.compile(
 SAVE_DIR = Path(__file__).resolve().parent / "reports" / "data"
 RISK_FREE_PCT = 4.0  # approx. cash/T-bill yield used for the Sharpe ratio
 TRADING_DAYS = 252
+VALID_TICKER = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,9}$")  # e.g. VOO, BRK.B, BF-B
 YEAR = 365.25 * 86400
 
 
@@ -105,7 +107,9 @@ def cagr(xs, ts, years):
 
 
 def analyze(ticker, quote=None):
-    res = get_json(CHART_URL.format(t=ticker))["chart"]["result"][0]
+    if not VALID_TICKER.match(ticker):
+        raise ValueError("invalid ticker symbol")
+    res = get_json(CHART_URL.format(t=urllib.parse.quote(ticker, safe="")))["chart"]["result"][0]
     meta = res["meta"]
     q = res["indicators"]
     # adjclose includes dividends -> total return; fall back to close
@@ -239,6 +243,9 @@ def main():
     with ThreadPoolExecutor(max_workers=8) as pool:
         etfs = [e for e in pool.map(run, quotes) if e]
     score(etfs)
+    for label in ("long_term", "short_term"):
+        for rank, e in enumerate(sorted(etfs, key=lambda e: -e["scores"][label]), 1):
+            e.setdefault("ranks", {})[label] = rank
 
     out["candidates_analyzed"] = len(etfs)
     out["long_term_picks"] = sorted(etfs, key=lambda e: -e["scores"]["long_term"])[:args.top]
