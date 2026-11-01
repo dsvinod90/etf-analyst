@@ -1,0 +1,40 @@
+#!/bin/bash
+# Run the etf-analyst agent headless, publish the PDF, and show a Mac notification.
+# Run by the daily launchd job; also run it by hand any time:  ./run-report.sh
+set -uo pipefail
+
+REPO="$(cd "$(dirname "$0")" && pwd)"
+REPORTS="$REPO/reports"
+LOGS="$REPORTS/logs"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+mkdir -p "$LOGS"
+LOG="$LOGS/run-$(date +%Y-%m-%d-%H%M).log"
+START_MARKER="$LOGS/.run-start"
+touch "$START_MARKER"
+
+notify() {
+  osascript -e "display notification \"$2\" with title \"ETF Analyst\" subtitle \"$1\"" 2>/dev/null || true
+}
+
+cd "$REPO" || exit 1
+echo "== etf-analyst run started $(date)" >"$LOG"
+
+claude -p "Run your full workflow: screen the US ETF market with the latest prices, rank ETFs for long-term and short-term investing with explanations, and publish the report as a PDF per Step 5. Return the PDF path first, then the full report." \
+  --agent etf-analyst \
+  --allowedTools "Bash(python3:*)" "Bash(ls:*)" "Bash(date:*)" Read Write WebSearch WebFetch \
+  >>"$LOG" 2>&1
+STATUS=$?
+
+# newest PDF written during this run
+PDF=$(find "$REPORTS" -maxdepth 1 -name 'etf-report-*.pdf' -newer "$START_MARKER" -print 2>/dev/null | sort | tail -1)
+echo "== agent finished $(date), exit $STATUS, pdf: ${PDF:-none}" >>"$LOG"
+
+if [[ $STATUS -ne 0 || -z "$PDF" ]]; then
+  notify "Run failed" "See $(basename "$LOG")"
+  echo "etf-analyst run failed; see $LOG" >&2
+  exit 1
+fi
+
+notify "Report ready" "$(basename "$PDF")"
+echo "$PDF"

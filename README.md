@@ -35,4 +35,23 @@ Run the script directly:
 ./make_pdf.py reports/etf-report-2026-10-30.md   # Markdown report -> PDF
 ```
 
+## Daily run on your Mac
+
+`launchd/com.dsvinod90.etf-analyst.plist` is a macOS launchd job that runs `run-report.sh` every day at 8:00 AM (Mac local time; America/New_York here). The script runs the agent headless with Claude Code, writes the report to `reports/`, logs to `reports/logs/`, and shows a Mac notification when the PDF is ready. If the Mac is asleep at 8:00 the job runs at the next wake; if it's shut down, that day is skipped.
+
+```sh
+# install / enable
+cp launchd/com.dsvinod90.etf-analyst.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dsvinod90.etf-analyst.plist
+
+# run on demand
+./run-report.sh                                            # in the foreground
+launchctl kickstart gui/$(id -u)/com.dsvinod90.etf-analyst # as the background job
+
+# disable
+launchctl bootout gui/$(id -u)/com.dsvinod90.etf-analyst
+```
+
+The paths in the plist are absolute; edit them if the repo lives somewhere other than `~/Dev/etf-analyst`.
+
 Output is informational analysis, not financial advice.

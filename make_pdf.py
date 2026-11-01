@@ -71,7 +71,9 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         page = Path(tmp) / "report.html"
         page.write_text(md_to_html(args.report, args.report.stem))
-        subprocess.run([find_chrome(), "--headless", "--disable-gpu", "--no-pdf-header-footer",
+        # CI runners (Linux) can't use Chrome's sandbox
+        sandbox = ["--no-sandbox"] if sys.platform.startswith("linux") else []
+        subprocess.run([find_chrome(), "--headless", "--disable-gpu", "--no-pdf-header-footer", *sandbox,
                         f"--print-to-pdf={out}", page.as_uri()],
                        check=True, capture_output=True)
     print(out)

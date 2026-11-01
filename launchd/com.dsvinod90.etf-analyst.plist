@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Daily 8:00 AM run of the etf-analyst agent (Mac local time, America/New_York).
+     If the Mac is asleep at 8:00, launchd runs it at the next wake.
+     Install:  cp launchd/com.dsvinod90.etf-analyst.plist ~/Library/LaunchAgents/
+               launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dsvinod90.etf-analyst.plist
+     Run now:  launchctl kickstart gui/$(id -u)/com.dsvinod90.etf-analyst
+     Remove:   launchctl bootout gui/$(id -u)/com.dsvinod90.etf-analyst -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dsvinod90.etf-analyst</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/vinoddalavai/Dev/etf-analyst/run-report.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>8</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/vinoddalavai/Dev/etf-analyst/reports/logs/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/vinoddalavai/Dev/etf-analyst/reports/logs/launchd.err.log</string>
+</dict>
+</plist>
