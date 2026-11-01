@@ -19,12 +19,14 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements-dev.txt
+          cache-dependency-path: |
+            requirements-dev.txt
+            pyproject.toml
 
       - name: Install dev tools
         run: |
           python -m venv .venv
-          .venv/bin/pip install --quiet -r requirements-dev.txt
+          .venv/bin/pip install --quiet -r requirements-dev.txt -e .
 
       - name: Lint
         run: make lint

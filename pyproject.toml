@@ -1,6 +1,10 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "etf-analyst"
-version = "0.1.0"
+version = "0.2.0"
 description = "Claude Code agents that screen US ETFs, write a report, verify it and publish a PDF"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -8,9 +12,22 @@ dependencies = []  # standard library only at runtime
 
 # Dev tools are pinned in requirements-dev.txt; markdown is an optional PDF fallback.
 
+[project.scripts]
+etf-screen = "etf_analyst.screen:main"
+etf-verify = "etf_analyst.verify:main"
+etf-pdf = "etf_analyst.pdf:main"
+etf-calc = "etf_analyst.safe_calc:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+etf_analyst = ["assets/*.css"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = [
@@ -47,7 +64,8 @@ docstring-code-format = true
 python_version = "3.12"
 strict = true
 warn_unreachable = true
-files = ["*.py", "tests"]
+files = ["src", "tests"]
+mypy_path = "src"
 
 [[tool.mypy.overrides]]
 module = ["markdown"]
@@ -55,11 +73,11 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]  # the scripts live at the repo root
-addopts = "-ra --strict-markers --cov=. --cov-report=term-missing"
+pythonpath = ["src"]
+addopts = "-ra --strict-markers --cov=etf_analyst --cov-report=term-missing"
 
 [tool.coverage.run]
-omit = ["tests/*", ".venv/*"]
+source = ["src"]
 
 [tool.coverage.report]
 fail_under = 80

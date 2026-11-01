@@ -26,22 +26,35 @@ notify() {
     || true
 }
 
+# The package's commands, installed into the project virtualenv by `make venv`
+BIN="$REPO/.venv/bin"
+COMMANDS=(etf-screen etf-pdf etf-verify etf-calc)
+
 # What the unattended agents may do without asking. Anything else is denied.
 # The agents read web search results, which could contain injected instructions, so:
-#  - Bash may run only this project's own scripts (no `python3 -c`, no other commands);
-#    the scripts themselves refuse file paths outside reports/
-#  - files may be read and written only under reports/ (nothing else is worth leaking)
+#  - Bash may run only this project's own commands (no python3, no other programs);
+#    the commands themselves refuse file paths outside reports/
+#  - files may be read and written only under reports/, plus reading metrics.py so the
+#    analyst can explain how each metric is calculated (source code, nothing secret)
 #  - WebFetch is removed entirely, so nothing can be sent out encoded in a URL;
 #    research uses WebSearch results only
-SCRIPTS=(fetch_etf_data.py make_pdf.py verify_tables.py calc.py)
-ALLOWED=(WebSearch "Read(~/Dev/etf-analyst/reports/**)" "Edit(~/Dev/etf-analyst/reports/**)")
-for s in "${SCRIPTS[@]}"; do
-  ALLOWED+=("Bash(python3 ~/Dev/etf-analyst/$s:*)" "Bash(python3 $REPO/$s:*)")
+ALLOWED=(WebSearch "Read(~/Dev/etf-analyst/reports/**)" "Edit(~/Dev/etf-analyst/reports/**)"
+         "Read(~/Dev/etf-analyst/src/etf_analyst/metrics.py)")
+for c in "${COMMANDS[@]}"; do
+  ALLOWED+=("Bash(~/Dev/etf-analyst/.venv/bin/$c:*)" "Bash($BIN/$c:*)")
 done
 DISALLOWED=(WebFetch)
 
 cd "$REPO" || exit 1
 echo "== etf-analyst run started $(date)" >"$LOG"
+
+for c in "${COMMANDS[@]}"; do
+  if [[ ! -x "$BIN/$c" ]]; then
+    echo "== missing $BIN/$c; run 'make venv' in $REPO" >>"$LOG"
+    notify "Run failed: setup needed" "Run 'make venv' in the etf-analyst folder" "$LOG"
+    exit 1
+  fi
+done
 
 claude -p "Run your full workflow: screen the US ETF market with the latest prices, rank ETFs for long-term and short-term investing with explanations, and publish the report as a PDF per Step 5. Return the PDF path first, then the full report." \
   --agent etf-analyst \
@@ -73,7 +86,7 @@ echo "== verifier finished $(date), confidence: ${SCORE:-unknown}" >>"$LOG"
 
 # The verifier reads the (untrusted) report, so injected text could inflate its score.
 # Re-check the table numbers here, in code, and cap the score if they don't hold up.
-ACCURACY=$(python3 "$REPO/verify_tables.py" "$MD" 2>>"$LOG" \
+ACCURACY=$("$BIN/etf-verify" "$MD" 2>>"$LOG" \
   | python3 -c 'import json, sys; print(json.load(sys.stdin).get("numeric_accuracy_pct") or 0)' 2>>"$LOG")
 CAP_NOTE=""
 if [[ -n "$SCORE" ]] && python3 -c 'import sys; sys.exit(0 if float(sys.argv[1] or 0) < 98 else 1)' "${ACCURACY:-0}" \
@@ -86,7 +99,7 @@ echo "== table accuracy ${ACCURACY:-unknown}%, final confidence ${SCORE:-unknown
 VERIFICATION="${MD%.md}-verification.md"
 if [[ -n "$SCORE" && -f "$VERIFICATION" ]]; then
   # rebuild the report PDF with a confidence badge and the verification as an appendix
-  python3 "$REPO/make_pdf.py" "$MD" --verification "$VERIFICATION" --confidence "${SCORE%/100}" -o "$PDF" >>"$LOG" 2>&1 \
+  "$BIN/etf-pdf" "$MD" --verification "$VERIFICATION" --confidence "${SCORE%/100}" -o "$PDF" >>"$LOG" 2>&1 \
     || echo "== could not add verification to the report PDF" >>"$LOG"
 fi
 

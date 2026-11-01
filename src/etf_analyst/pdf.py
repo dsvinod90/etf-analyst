@@ -1,12 +1,11 @@
-#!/usr/bin/env python3
 """Render a Markdown ETF report to PDF.
 
-Markdown -> HTML via pandoc (falls back to the Python ``markdown`` package), then a sanitizer
-that keeps only formatting tags, then HTML -> PDF via headless Google Chrome. Styles live in
+Markdown -> HTML via pandoc (falls back to the Python ``markdown`` package), then the
+allowlist sanitizer, then HTML -> PDF via headless Google Chrome. Styles live in
 ``assets/report.css``. Input and output paths must be inside ``reports/``.
 
 Usage:
-    make_pdf.py REPORT.md [-o OUT.pdf] [--verification VERIFICATION.md] [--confidence 0-100]
+    etf-pdf REPORT.md [-o OUT.pdf] [--verification VERIFICATION.md] [--confidence 0-100]
 """
 
 import argparse
@@ -17,13 +16,13 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Sequence
-from html.parser import HTMLParser
+from importlib.resources import files
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-REPORTS = ROOT / "reports"
-STYLESHEET = ROOT / "assets" / "report.css"
+from etf_analyst import paths
+from etf_analyst.sanitize import sanitize
 
+STYLESHEET = files("etf_analyst") / "assets" / "report.css"
 CHROME_PATHS = (
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -31,7 +30,6 @@ CHROME_PATHS = (
 )
 CHROME_COMMANDS = ("google-chrome", "chromium", "chromium-browser")
 FONT_WAIT_MS = 10_000  # let web fonts load before Chrome prints
-
 FONTS = (
     "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800"
     "&family=Source+Serif+4:ital,wght@0,600;1,400&display=swap"
@@ -41,7 +39,6 @@ CSP = (
     "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src https://fonts.gstatic.com; img-src data:"
 )
-
 # colour signed numbers in table cells: +12.3% green, -4.5% / −4.5% red
 SIGNED = re.compile(r"(<td[^>]*>\s*(?:<strong>)?)([+\-−]\s?\$?\d[\d.,]*%?)")
 TICKER_CELL = re.compile(r"<td([^>]*)>(\s*[A-Z]{2,5}\s*)</td>")
@@ -51,114 +48,6 @@ CONFIDENCE = re.compile(
     re.IGNORECASE,
 )
 BADGE_CLASS = {"High": "high", "Good": "good", "Use with caution": "caution", "Unreliable": "low"}
-
-ALLOWED_TAGS = frozenset(
-    [
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "p",
-        "br",
-        "hr",
-        "ul",
-        "ol",
-        "li",
-        "blockquote",
-        "table",
-        "thead",
-        "tbody",
-        "tr",
-        "th",
-        "td",
-        "colgroup",
-        "col",
-        "strong",
-        "b",
-        "em",
-        "i",
-        "code",
-        "pre",
-        "a",
-        "del",
-        "sup",
-        "sub",
-        "span",
-    ]
-)
-ALLOWED_ATTRS = frozenset({"id", "class", "style", "href", "colspan", "rowspan", "start", "width"})
-SAFE_HREF = re.compile(r"^(https?:|#)", re.IGNORECASE)  # no javascript:, data:, file: links
-SAFE_STYLE = re.compile(r"\s*(text-align|width):\s*[\w.%\s-]+;?\s*")
-
-
-class Sanitizer(HTMLParser):
-    """Rebuild HTML keeping only formatting tags and attributes; everything else is escaped.
-
-    Reports are written by an agent that reads web pages, so their HTML is untrusted:
-    ``<script>``, ``<img>``, ``<iframe>`` and the like come out as visible, inert text.
-    """
-
-    def __init__(self) -> None:
-        """Start with empty output; feed HTML with ``feed()``."""
-        super().__init__(convert_charrefs=False)
-        self.out: list[str] = []
-
-    @staticmethod
-    def _attrs(attrs: list[tuple[str, str | None]]) -> str:
-        keep = []
-        for name, raw in attrs:
-            value = raw or ""
-            if name not in ALLOWED_ATTRS:
-                continue
-            if name == "href" and not SAFE_HREF.match(value.strip()):
-                continue
-            if name == "style" and not SAFE_STYLE.fullmatch(value):
-                continue
-            keep.append(f' {name}="{html.escape(value)}"')
-        return "".join(keep)
-
-    def _start(self, tag: str, attrs: list[tuple[str, str | None]], close: str) -> None:
-        if tag in ALLOWED_TAGS:
-            self.out.append(f"<{tag}{self._attrs(attrs)}{close}>")
-        else:
-            self.out.append(html.escape(self.get_starttag_text() or ""))
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        """Keep an allowed opening tag (with safe attributes); escape any other."""
-        self._start(tag, attrs, "")
-
-    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        """Keep an allowed self-closing tag (e.g. ``<br />``); escape any other."""
-        self._start(tag, attrs, " /")
-
-    def handle_endtag(self, tag: str) -> None:
-        """Keep an allowed closing tag; escape any other."""
-        self.out.append(f"</{tag}>" if tag in ALLOWED_TAGS else html.escape(f"</{tag}>"))
-
-    def handle_data(self, data: str) -> None:
-        """Escape text so it can't be read as markup."""
-        self.out.append(html.escape(data, quote=False))
-
-    def handle_entityref(self, name: str) -> None:
-        """Pass named entities like ``&amp;`` through unchanged."""
-        self.out.append(f"&{name};")
-
-    def handle_charref(self, name: str) -> None:
-        """Pass numeric entities like ``&#8722;`` through unchanged."""
-        self.out.append(f"&#{name};")
-
-    def handle_comment(self, data: str) -> None:
-        """Drop HTML comments."""
-
-
-def sanitize(body: str) -> str:
-    """Return ``body`` with every tag and attribute outside the allowlists escaped."""
-    parser = Sanitizer()
-    parser.feed(body)
-    parser.close()
-    return "".join(parser.out)
 
 
 def md_to_body(md_text: str) -> str:
@@ -247,17 +136,6 @@ def build_html(
     )
 
 
-def in_reports(path: Path, suffix: str, what: str) -> Path:
-    """Resolve ``path`` and exit unless it's a ``suffix`` file inside ``reports/``.
-
-    The agents that call this script read untrusted web content, so its arguments are untrusted.
-    """
-    resolved = path.expanduser().resolve()
-    if not resolved.is_relative_to(REPORTS) or resolved.suffix != suffix:
-        sys.exit(f"{what} must be a {suffix} file inside {REPORTS}")
-    return resolved
-
-
 def find_chrome() -> str:
     """Return the path of an installed Chrome, Chromium or Edge, or exit with a message."""
     for path in CHROME_PATHS:
@@ -313,11 +191,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     """Render the report given on the command line and print the PDF's path."""
     args = parse_args(argv)
-    report = in_reports(args.report, ".md", "report")
-    out = in_reports(args.out or report.with_suffix(".pdf"), ".pdf", "output")
-    verification = None
-    if args.verification:
-        verification = in_reports(args.verification, ".md", "verification").read_text()
+    reports = paths.REPORTS_DIR
+    try:
+        report = paths.confine(args.report, reports, ".md", "report")
+        out = paths.confine(args.out or report.with_suffix(".pdf"), reports, ".pdf", "output")
+        verification = None
+        if args.verification:
+            verification = paths.confine(
+                args.verification, reports, ".md", "verification"
+            ).read_text()
+    except paths.PathError as e:
+        sys.exit(str(e))
     print_pdf(build_html(report.read_text(), report.stem, verification, args.confidence), out)
     print(out)
 

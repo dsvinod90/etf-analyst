@@ -17,13 +17,13 @@ Use the report path you were given. If none was given, use the newest `~/Dev/etf
 Run:
 
 ```
-python3 ~/Dev/etf-analyst/verify_tables.py <report.md>
+~/Dev/etf-analyst/.venv/bin/etf-verify <report.md>
 ```
 
 It compares every number in the report's tables with the raw data the analyst used (the file named on the report's `Data file:` line, or the newest saved data file) and returns `cells_checked`, `numeric_accuracy_pct`, `mismatches` and `unverifiable` cells. If its `note` says fresh data was fetched, mention that in your report: mismatches could then come from prices moving rather than errors.
 
 ## Step 3 — Check the numbers in the prose
-Read the report. For each number in the text that describes a specific fund (returns, CAGR, ranks such as "#11 of 205", RSI, drawdowns, "$10,000 grew to about $42,000"), check it against the data file from Step 2 (use Read on that JSON). Use the calculator for any arithmetic — e.g. compounding: `python3 ~/Dev/etf-analyst/calc.py "10000*1.1542**10"` (it accepts several expressions at once) — never do math in your head. For rank claims, use each fund's `ranks` field in the data file. Check at least 15 prose claims, prioritizing the ones the recommendations depend on. A rounded figure (15.42 → 15.4%) is correct.
+Read the report. For each number in the text that describes a specific fund (returns, CAGR, ranks such as "#11 of 205", RSI, drawdowns, "$10,000 grew to about $42,000"), check it against the data file from Step 2 (use Read on that JSON). Use the calculator for any arithmetic — e.g. compounding: `~/Dev/etf-analyst/.venv/bin/etf-calc "10000*1.1542**10"` (it accepts several expressions at once) — never do math in your head. For rank claims, use each fund's `ranks` field in the data file. Check at least 15 prose claims, prioritizing the ones the recommendations depend on. A rounded figure (15.42 → 15.4%) is correct.
 
 ## Step 4 — Fact-check the outside claims
 The report states market news (index moves, oil prices, Fed decisions, company results, fund fees and holdings). Pick the 6–8 claims that matter most to its conclusions and check each with WebSearch, preferring primary or reputable sources (issuer sites, Reuters, Bloomberg, CNBC, WSJ, the Fed). Verdict per claim: **Confirmed**, **Partly correct** (say what's off), **Contradicted**, or **Unverified** (no reliable source found — not the same as wrong). Expense ratios the report says came from web search should be checked against the issuer's site.
@@ -61,7 +61,7 @@ Score each part, then add them up. Show the arithmetic.
 If any error would change a recommendation (e.g. a pick's trend or fee is wrong), cap the score at 74 and say which recommendation is affected.
 
 ## Step 8 — Write and publish the verification report
-Write it to the same folder as the report, named `<report name>-verification.md`, then run `python3 ~/Dev/etf-analyst/make_pdf.py <that file>`.
+Write it to the same folder as the report, named `<report name>-verification.md`, then run `~/Dev/etf-analyst/.venv/bin/etf-pdf <that file>`.
 
 Structure:
 1. `# Verification — <report file name>`

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Check every number in an ETF report's Markdown tables against the raw data.
 
 The data file defaults to the one named on the report's "Data file:" line, else the newest
@@ -7,30 +6,28 @@ fetched (fine after the market close, but prices may have moved if the report is
 today's session). Prints JSON: counts, accuracy %, and every mismatch / unverifiable cell.
 
 Usage:
-    verify_tables.py REPORT.md [--data DATA.json]
+    etf-verify REPORT.md [--data DATA.json]
 """
 
 import argparse
 import json
 import re
-import subprocess
 import sys
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-REPO = Path(__file__).resolve().parent
-REPORTS_DIR = REPO / "reports"
-DATA_DIR = REPORTS_DIR / "data"
+from etf_analyst import paths
+from etf_analyst.records import ETF
+from etf_analyst.screen import run_screen
+
 TICKER = re.compile(r"^[A-Z]{2,5}$")
 NUMBER = re.compile(r"[+\-]?\d[\d,]*\.?\d*")
 TABLE_RULE = re.compile(r"^\s*\|?\s*:?-{3,}")  # the |---|---| line under a table header
 DATA_FILE_LINE = re.compile(r"Data file:\**\s*`?([^\s`]+\.json)")
 MIN_TOLERANCE = 0.011  # always allow a rounding difference of about one cent / 0.01 point
 DASHES = str.maketrans({"−": "-", "–": "-"})  # typographic minus / en dash -> ASCII
-
-ETF = dict[str, Any]
 Getter = Callable[[ETF], float | None]
 
 
@@ -149,38 +146,16 @@ def tables(md: str) -> Iterator[tuple[list[str], list[list[str]]]]:
             i += 1
 
 
-def in_dir(path: Path | str, base: Path, suffix: str, what: str) -> Path:
-    """Resolve ``path`` and exit unless it's a ``suffix`` file inside ``base``.
-
-    Reports are written by an agent that reads the web, so paths from them are untrusted.
-    """
-    resolved = Path(path).expanduser().resolve()
-    if not resolved.is_relative_to(base.resolve()) or resolved.suffix != suffix:
-        sys.exit(f"{what} must be a {suffix} file inside {base}")
-    return resolved
-
-
 def find_data_file(report_path: Path, md: str) -> Path | None:
-    """Find the data file a report was built from, accepting only files in ``DATA_DIR``."""
+    """Find the data file a report was built from, accepting only files in ``reports/data/``."""
     m = DATA_FILE_LINE.search(md)
     if m:
         candidate = Path(m[1]).expanduser().resolve()
-        if candidate.is_relative_to(DATA_DIR.resolve()) and candidate.exists():
+        if candidate.is_relative_to(paths.DATA_DIR.resolve()) and candidate.exists():
             return candidate
     report_time = report_path.stat().st_mtime
-    older = [p for p in DATA_DIR.glob("etf-data-*.json") if p.stat().st_mtime <= report_time]
+    older = [p for p in paths.DATA_DIR.glob("etf-data-*.json") if p.stat().st_mtime <= report_time]
     return max(older, key=lambda p: p.stat().st_mtime) if older else None
-
-
-def fetch_fresh_data() -> Path:
-    """Run the screener with ``--save`` and return the data file it wrote."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [sys.executable, str(REPO / "fetch_etf_data.py"), "--save"],
-        check=True,
-        capture_output=True,
-    )
-    return max(DATA_DIR.glob("etf-data-*.json"), key=lambda p: p.stat().st_mtime)
 
 
 def load_etfs(data_path: Path) -> tuple[dict[str, Any], dict[str, ETF]]:
@@ -265,17 +240,23 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     """Check the report given on the command line and print the results as JSON."""
     args = parse_args(argv)
-    report = in_dir(args.report, REPORTS_DIR, ".md", "report")
+    try:
+        report = paths.confine(args.report, paths.REPORTS_DIR, ".md", "report")
+        data_arg = (
+            paths.confine(args.data, paths.DATA_DIR, ".json", "data file") if args.data else None
+        )
+    except paths.PathError as e:
+        sys.exit(str(e))
     md = report.read_text()
 
     note = None
-    if args.data:
-        data_path = in_dir(args.data, DATA_DIR, ".json", "data file")
+    if data_arg:
+        data_path = data_arg
     else:
         found = find_data_file(report, md)
         if found is None:
             note = "No saved data file for this report; verified against freshly fetched data."
-            found = fetch_fresh_data()
+            found = Path(run_screen(save=True)["saved_to"])
         data_path = found
     data, etfs = load_etfs(data_path)
     result = check_report(md, etfs)

@@ -3,9 +3,10 @@ from pathlib import Path
 
 import pytest
 
-import verify_tables as vt
+from etf_analyst import verify as vt
+from etf_analyst.records import ETF
 
-ETFS: dict[str, vt.ETF] = {
+ETFS: dict[str, ETF] = {
     "VOO": {
         "ticker": "VOO",
         "price": 694.81,
@@ -108,47 +109,24 @@ def test_unknown_tickers_are_unverifiable() -> None:
     assert {u["reason"] for u in result.unverifiable} == {"ticker not in data file"}
 
 
-# --- path confinement --------------------------------------------------------------------
-
-
-def test_in_dir_accepts_files_inside_base(tmp_path: Path) -> None:
-    (tmp_path / "r.md").write_text("x")
-    assert vt.in_dir(tmp_path / "r.md", tmp_path, ".md", "report") == (tmp_path / "r.md").resolve()
-
-
-@pytest.mark.parametrize("path", ["/etc/passwd", "../outside.md", "inside.txt"])
-def test_in_dir_refuses_other_paths(path: str, tmp_path: Path) -> None:
-    with pytest.raises(SystemExit):
-        vt.in_dir(tmp_path / path if not path.startswith("/") else path, tmp_path, ".md", "report")
-
-
-def test_find_data_file_ignores_paths_outside_the_data_dir(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
-    real = data_dir / "etf-data-1.json"
+def test_find_data_file_ignores_paths_outside_the_data_dir(tmp_reports: Path) -> None:
+    real = tmp_reports / "data" / "etf-data-1.json"
     real.write_text(json.dumps({"all_etfs": []}))
-    secret = tmp_path / "secret.json"
+    secret = tmp_reports.parent / "secret.json"
     secret.write_text("{}")
-    report = tmp_path / "report.md"
+    report = tmp_reports / "report.md"
     report.write_text(f"**Data file:** `{secret}`")
-    monkeypatch.setattr(vt, "DATA_DIR", data_dir)
 
     assert vt.find_data_file(report, report.read_text()) == real
 
 
 def test_main_checks_a_report_end_to_end(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_reports: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
-    data = data_dir / "etf-data-1.json"
+    data = tmp_reports / "data" / "etf-data-1.json"
     data.write_text(json.dumps({"generated_at": "now", "all_etfs": list(ETFS.values())}))
-    report = tmp_path / "etf-report.md"
+    report = tmp_reports / "etf-report.md"
     report.write_text(f"**Data file:** `{data}`\n\n{REPORT}")
-    monkeypatch.setattr(vt, "REPORTS_DIR", tmp_path)
-    monkeypatch.setattr(vt, "DATA_DIR", data_dir)
 
     vt.main([str(report)])
     out = json.loads(capsys.readouterr().out)
@@ -157,12 +135,27 @@ def test_main_checks_a_report_end_to_end(
     assert out["note"] is None
 
 
-def test_main_refuses_a_data_file_outside_reports(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_main_fetches_fresh_data_when_none_was_saved(
+    tmp_reports: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    report = tmp_path / "r.md"
+    report = tmp_reports / "etf-report.md"
+    report.write_text(REPORT)  # no "Data file:" line and nothing saved before it
+    fresh = tmp_reports / "data" / "etf-data-fresh.json"
+
+    def fake_screen(save: bool) -> dict[str, str]:
+        fresh.write_text(json.dumps({"all_etfs": list(ETFS.values())}))
+        return {"saved_to": str(fresh)}
+
+    monkeypatch.setattr(vt, "run_screen", fake_screen)
+    vt.main([str(report)])
+    out = json.loads(capsys.readouterr().out)
+    assert out["note"].startswith("No saved data file")
+    assert out["numeric_accuracy_pct"] == 100.0
+
+
+@pytest.mark.parametrize("bad", [["/etc/passwd.md"], ["REPORT", "--data", "/etc/hosts.json"]])
+def test_main_refuses_paths_outside_reports(tmp_reports: Path, bad: list[str]) -> None:
+    report = tmp_reports / "r.md"
     report.write_text(REPORT)
-    monkeypatch.setattr(vt, "REPORTS_DIR", tmp_path)
-    monkeypatch.setattr(vt, "DATA_DIR", tmp_path / "data")
-    with pytest.raises(SystemExit):
-        vt.main([str(report), "--data", "/etc/hosts.json"])
+    with pytest.raises(SystemExit, match="must be a"):
+        vt.main([str(report) if arg == "REPORT" else arg for arg in bad])

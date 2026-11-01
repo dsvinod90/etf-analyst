@@ -6,11 +6,11 @@ BIN := $(VENV)/bin
 help:  ## Show the available targets
 	@grep -E '^[a-z]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
 
-venv: $(BIN)/activate  ## Create .venv and install the pinned dev tools
-$(BIN)/activate: requirements-dev.txt
+venv: $(BIN)/activate  ## Create .venv: the package (editable, with its commands) + pinned dev tools
+$(BIN)/activate: requirements-dev.txt pyproject.toml
 	python3 -m venv $(VENV)
 	$(BIN)/pip install --quiet --upgrade pip
-	$(BIN)/pip install --quiet -r requirements-dev.txt
+	$(BIN)/pip install --quiet -r requirements-dev.txt -e .
 	touch $@
 
 lint: venv  ## Lint Python (ruff) and the shell script (shellcheck)
