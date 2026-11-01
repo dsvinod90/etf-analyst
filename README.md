@@ -1,14 +1,16 @@
 # etf-analyst
 
-A Claude Code agent that fetches the latest prices for an ETF watchlist and analyzes which ETFs are better suited for long-term vs short-term investing.
+A Claude Code agent that scans the US ETF market with live prices, ranks ETFs for long-term and short-term investing, and explains the best picks.
 
-## Contents
+## How it works
 
-| File | Purpose |
-|------|---------|
-| `fetch_etf_data.py` | Pulls price history from Yahoo Finance (no API key) and computes returns, CAGR, volatility, max drawdown, dividend yield, SMAs and RSI. Outputs JSON. Python 3 stdlib only. |
-| `watchlist.txt` | Tickers to track, one per line. |
-| `.claude/agents/etf-analyst.md` | The Claude Code subagent definition. |
+1. `fetch_etf_data.py` pulls ~200 candidates from Yahoo Finance's ETF screeners (Morningstar 4–5 star funds and today's top movers), keeps liquid, unleveraged funds (≥ $1B assets, ≥ 100k avg volume), and adds a few benchmarks (SPY, VOO, VTI, QQQM, VT, VXUS, SCHD, BND).
+2. For each fund it computes returns, CAGR, volatility, max drawdown, dividend yield, moving averages and RSI, then scores it:
+   - **Long-term:** 5y/10y CAGR, Sharpe ratio, max drawdown, expense ratio, fund size.
+   - **Short-term:** 1m/3m/6m momentum, trend vs 200-day average, volatility; overbought funds penalized.
+3. The agent researches the top picks, groups duplicates (e.g. VOO/IVV/SPY), and writes a report explaining why each pick fits each horizon.
+
+No API key needed; Python 3 standard library only.
 
 ## Setup
 
@@ -17,17 +19,18 @@ git clone <this repo> ~/Dev/etf-analyst
 ln -s ~/Dev/etf-analyst/.claude/agents/etf-analyst.md ~/.claude/agents/etf-analyst.md
 ```
 
-The symlink makes the agent available in every Claude Code session. The agent runs the script from `~/Dev/etf-analyst/`; if you clone somewhere else, update the paths in `.claude/agents/etf-analyst.md`.
+The symlink makes the agent available in every Claude Code session. The agent runs the script from `~/Dev/etf-analyst/`; if you clone somewhere else, update the path in `.claude/agents/etf-analyst.md`.
 
 ## Usage
 
-In Claude Code: *"Run the etf-analyst"* or *"Ask etf-analyst whether VOO or QQQM is better long term."*
+In Claude Code: *"Run the etf-analyst"*, *"Which ETFs are good for long-term investing right now?"*, or *"Compare VOO, QQQM and SCHD."*
 
 Run the script directly:
 
 ```sh
-./fetch_etf_data.py              # uses watchlist.txt
-./fetch_etf_data.py VOO QQQM     # specific tickers
+./fetch_etf_data.py                # screen the market, top 15 per horizon
+./fetch_etf_data.py --top 25       # longer lists
+./fetch_etf_data.py VOO QQQM SCHD  # rank only these tickers
 ```
 
 Output is informational analysis, not financial advice.

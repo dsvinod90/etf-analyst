@@ -1,33 +1,56 @@
 #!/usr/bin/env python3
-"""Fetch latest prices and compute performance/risk metrics for an ETF watchlist.
+"""Discover ETFs, compute performance/risk metrics, and rank them for long- and short-term investing.
 
-Data source: Yahoo Finance public chart API (no key required).
-Usage: fetch_etf_data.py [TICKER ...]   (defaults to watchlist.txt next to this file)
+Data source: Yahoo Finance public screener + chart APIs (no key required).
+Usage:
+  fetch_etf_data.py                 # discover candidates from Yahoo screeners and rank them
+  fetch_etf_data.py VOO QQQM ...    # analyze and rank only these tickers
+  fetch_etf_data.py --top 20        # number of picks per horizon (default 15)
 Prints a JSON document to stdout.
 """
+import argparse
 import json
 import math
+import re
 import sys
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from pathlib import Path
 
-WATCHLIST = Path(__file__).with_name("watchlist.txt")
-URL = "https://query1.finance.yahoo.com/v8/finance/chart/{t}?range=10y&interval=1d&events=div"
+SCREENER_URL = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds={s}&count=250"
+CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{t}?range=10y&interval=1d&events=div"
+# top_performing_etfs: Morningstar 4-5 star funds; top_etfs_us: today's biggest movers
+SCREENERS = ["top_performing_etfs", "top_etfs_us"]
+# Always included so picks can be compared against the obvious defaults
+BENCHMARKS = ["SPY", "VOO", "VTI", "QQQM", "VT", "VXUS", "SCHD", "BND"]
+MIN_NET_ASSETS = 1e9
+MIN_AVG_VOLUME = 100_000
+EXCLUDE_NAME = re.compile(
+    r"\b(2x|3x|-1x|-2x|-3x|ultra|ultrapro|bull|bear|inverse|leveraged|daily)\b|\bshort\b(?![- ](term|duration|maturity))",
+    re.I)
+RISK_FREE_PCT = 4.0  # approx. cash/T-bill yield used for the Sharpe ratio
 TRADING_DAYS = 252
+YEAR = 365.25 * 86400
 
 
-def load_tickers(argv):
-    if argv:
-        return [t.strip().upper() for a in argv for t in a.split(",") if t.strip()]
-    lines = WATCHLIST.read_text().splitlines()
-    return [l.split("#")[0].strip().upper() for l in lines if l.split("#")[0].strip()]
-
-
-def fetch(ticker):
-    req = urllib.request.Request(URL.format(t=ticker), headers={"User-Agent": "Mozilla/5.0"})
+def get_json(url):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=20) as r:
-        return json.load(r)["chart"]["result"][0]
+        return json.load(r)
+
+
+def discover():
+    """Return {ticker: screener quote} for liquid, unleveraged ETFs from Yahoo's screeners."""
+    found = {}
+    for s in SCREENERS:
+        for q in get_json(SCREENER_URL.format(s=s))["finance"]["result"][0]["quotes"]:
+            name = q.get("longName") or q.get("shortName") or ""
+            if (q.get("quoteType") == "ETF"
+                    and (q.get("netAssets") or 0) >= MIN_NET_ASSETS
+                    and (q.get("averageDailyVolume3Month") or 0) >= MIN_AVG_VOLUME
+                    and not EXCLUDE_NAME.search(name)):
+                found.setdefault(q["symbol"], q)
+    return found
 
 
 def pct(a, b):
@@ -72,16 +95,15 @@ def max_drawdown(xs):
 
 
 def cagr(xs, ts, years):
-    target = ts[-1] - years * 365.25 * 86400
+    target = ts[-1] - years * YEAR
     if ts[0] > target + 7 * 86400:  # not enough history
         return None
     i = next(i for i, t in enumerate(ts) if t >= target)
-    actual = (ts[-1] - ts[i]) / (365.25 * 86400)
-    return round(((xs[-1] / xs[i]) ** (1 / actual) - 1) * 100, 2)
+    return round(((xs[-1] / xs[i]) ** (YEAR / (ts[-1] - ts[i])) - 1) * 100, 2)
 
 
-def analyze(ticker):
-    res = fetch(ticker)
+def analyze(ticker, quote=None):
+    res = get_json(CHART_URL.format(t=ticker))["chart"]["result"][0]
     meta = res["meta"]
     q = res["indicators"]
     # adjclose includes dividends -> total return; fall back to close
@@ -92,6 +114,7 @@ def analyze(ticker):
     close = [c for _, c, _ in rows]
     adj = [a for _, _, a in rows]
     price = meta.get("regularMarketPrice") or close[-1]
+    quote = quote or {}
 
     def back(xs, days):
         return xs[-1 - days] if len(xs) > days else None
@@ -100,6 +123,7 @@ def analyze(ticker):
     year_ago = datetime.now(timezone.utc).timestamp() - 365 * 86400
     ttm_div = sum(d["amount"] for d in divs.values() if d["date"] >= year_ago)
     last_year = close[-TRADING_DAYS:]
+    sma200 = sma(close, 200)
 
     return {
         "ticker": ticker,
@@ -107,6 +131,8 @@ def analyze(ticker):
         "price": round(price, 2),
         "as_of": datetime.fromtimestamp(meta["regularMarketTime"], timezone.utc).isoformat(),
         "day_change_pct": meta.get("regularMarketChangePercent") and round(meta["regularMarketChangePercent"], 2),
+        "expense_ratio_pct": quote.get("netExpenseRatio"),
+        "net_assets_bn": quote.get("netAssets") and round(quote["netAssets"] / 1e9, 1),
         "52w_high": round(max(last_year), 2),
         "52w_low": round(min(last_year), 2),
         "pct_below_52w_high": pct(price, max(last_year)),
@@ -122,20 +148,99 @@ def analyze(ticker):
         "max_drawdown_5y_pct": max_drawdown(adj[-5 * TRADING_DAYS:]),
         "ttm_dividend_yield_pct": round(ttm_div / price * 100, 2) if price else None,
         "sma_50": sma(close, 50),
-        "sma_200": sma(close, 200),
-        "price_vs_sma200_pct": pct(price, sma(close, 200)),
+        "sma_200": sma200,
+        "price_vs_sma200_pct": pct(price, sma200),
         "rsi_14": rsi(close[-250:]),
-        "history_years": round(len(adj) / TRADING_DAYS, 1),
+        "history_years": round((ts[-1] - ts[0]) / YEAR, 1),
     }
 
 
+def zscores(etfs, key):
+    """Standardize key(e) across etfs; missing values score 0 (the average)."""
+    vals = {e["ticker"]: key(e) for e in etfs}
+    present = [v for v in vals.values() if v is not None]
+    if len(present) < 2:
+        return {t: 0.0 for t in vals}
+    m = sum(present) / len(present)
+    sd = math.sqrt(sum((v - m) ** 2 for v in present) / len(present)) or 1
+    return {t: 0.0 if v is None else (v - m) / sd for t, v in vals.items()}
+
+
+def score(etfs):
+    """Attach long_term and short_term scores. Weights are heuristics, not predictions."""
+    def sharpe(e):
+        # excess return over cash, so ultra-low-volatility bond funds don't win by default
+        c, v = e["cagr_pct"]["5y"], e["volatility_5y_pct"]
+        return (c - RISK_FREE_PCT) / v if c is not None and v else None
+
+    long_parts = {  # weight, metric (higher is better)
+        "5y_cagr": (0.20, lambda e: e["cagr_pct"]["5y"]),
+        "10y_cagr": (0.20, lambda e: e["cagr_pct"]["10y"]),
+        "sharpe_5y": (0.30, sharpe),
+        "max_drawdown_5y": (0.10, lambda e: e["max_drawdown_5y_pct"]),
+        "low_expense": (0.15, lambda e: None if e["expense_ratio_pct"] is None else -e["expense_ratio_pct"]),
+        "fund_size": (0.05, lambda e: e["net_assets_bn"] and math.log(e["net_assets_bn"])),
+    }
+    short_parts = {
+        "3m_return": (0.30, lambda e: e["total_return_pct"]["3m"]),
+        "6m_return": (0.25, lambda e: e["total_return_pct"]["6m"]),
+        "1m_return": (0.10, lambda e: e["total_return_pct"]["1m"]),
+        "trend_vs_sma200": (0.20, lambda e: e["price_vs_sma200_pct"]),
+        "low_volatility_1y": (0.15, lambda e: e["volatility_1y_pct"] and -e["volatility_1y_pct"]),
+    }
+    for label, parts in (("long_term", long_parts), ("short_term", short_parts)):
+        z = {k: zscores(etfs, f) for k, (_, f) in parts.items()}
+        for e in etfs:
+            s = sum(w * z[k][e["ticker"]] for k, (w, _) in parts.items())
+            flags = []
+            if label == "long_term" and e["history_years"] < 5:
+                s -= 1.0
+                flags.append("under 5 years of history")
+            if label == "short_term":
+                if e["rsi_14"] and e["rsi_14"] > 75:
+                    s -= 0.5
+                    flags.append("overbought (RSI > 75)")
+                if e["price_vs_sma200_pct"] is not None and e["price_vs_sma200_pct"] < 0:
+                    flags.append("below 200-day average (downtrend)")
+            e.setdefault("scores", {})[label] = round(s, 3)
+            if flags:
+                e.setdefault("flags", {})[label] = flags
+
+
 def main():
-    out = {"generated_at": datetime.now(timezone.utc).isoformat(), "etfs": [], "errors": {}}
-    for t in load_tickers(sys.argv[1:]):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("tickers", nargs="*", help="analyze only these (comma or space separated)")
+    ap.add_argument("--top", type=int, default=15, help="picks per horizon")
+    args = ap.parse_args()
+
+    out = {"generated_at": datetime.now(timezone.utc).isoformat(), "errors": {}}
+    if args.tickers:
+        quotes = {t.strip().upper(): None for a in args.tickers for t in a.split(",") if t.strip()}
+        out["mode"] = "tickers"
+    else:
+        quotes = discover()
+        out["mode"] = "discovery"
+        out["screeners"] = SCREENERS
+        out["filters"] = {"min_net_assets": MIN_NET_ASSETS, "min_avg_volume": MIN_AVG_VOLUME,
+                          "excluded": "leveraged/inverse"}
+        for b in BENCHMARKS:
+            quotes.setdefault(b, None)
+
+    def run(t):
         try:
-            out["etfs"].append(analyze(t))
+            return analyze(t, quotes[t])
         except Exception as e:  # keep going if one ticker fails
             out["errors"][t] = str(e)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        etfs = [e for e in pool.map(run, quotes) if e]
+    score(etfs)
+
+    out["candidates_analyzed"] = len(etfs)
+    out["long_term_picks"] = sorted(etfs, key=lambda e: -e["scores"]["long_term"])[:args.top]
+    out["short_term_picks"] = sorted(etfs, key=lambda e: -e["scores"]["short_term"])[:args.top]
+    picked = {e["ticker"] for e in out["long_term_picks"] + out["short_term_picks"]}
+    out["benchmarks"] = [e for e in etfs if e["ticker"] in BENCHMARKS and e["ticker"] not in picked]
     json.dump(out, sys.stdout, indent=2)
     print()
 
