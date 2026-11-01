@@ -9,8 +9,9 @@ A Claude Code agent that scans the US ETF market with live prices, ranks ETFs fo
    - **Long-term:** 5y/10y CAGR, Sharpe ratio, max drawdown, expense ratio, fund size.
    - **Short-term:** 1m/3m/6m momentum, trend vs 200-day average, volatility; overbought funds penalized.
 3. The agent researches the top picks, groups duplicates (e.g. VOO/IVV/SPY), and writes a report explaining why each pick fits each horizon.
+4. The report is saved to `reports/etf-report-<date>.md` and published as `reports/etf-report-<date>.pdf` by `make_pdf.py`. The `reports/` folder is git-ignored.
 
-No API key needed; Python 3 standard library only.
+No API key needed. The data script uses only the Python 3 standard library. The PDF step needs Google Chrome plus either `pandoc` (`brew install pandoc`) or the Python `markdown` package.
 
 ## Setup
 
@@ -31,6 +32,7 @@ Run the script directly:
 ./fetch_etf_data.py                # screen the market, top 15 per horizon
 ./fetch_etf_data.py --top 25       # longer lists
 ./fetch_etf_data.py VOO QQQM SCHD  # rank only these tickers
+./make_pdf.py reports/etf-report-2026-10-30.md   # Markdown report -> PDF
 ```
 
 Output is informational analysis, not financial advice.
