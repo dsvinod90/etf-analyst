@@ -185,10 +185,16 @@ scanning alert; each has a test in `tests/`. Don't regress them.
   the agents rely on, update `.claude/agents/etf-analyst.md` and
   `.claude/agents/etf-report-verifier.md` to match. Re-read both files in full before
   committing; don't just search for command names. Stale statements (what the agents may
-  read, which tools exist) mislead them as much as wrong paths.
+  read, which tools exist) mislead them as much as wrong paths. `tests/test_agent_files.py`
+  enforces the mechanical part: every `.venv/bin/etf-*` command the agents or `run-report.sh`
+  mention must be declared in `[project.scripts]`, `COMMANDS` in `run-report.sh` must match the
+  declared commands exactly, and every repo path an agent mentions must exist. It can't check
+  meaning, so the full re-read is still required.
 - Before committing: `make check` passes. For changes to commands the agents call, also run
   `./run-report.sh` once and confirm the log ends with a confidence score.
-- After changing `pyproject.toml` (dependencies, commands), rerun `make venv`.
+- After changing `pyproject.toml` (dependencies, commands), rerun `make venv`. Always build
+  `.venv` with `make venv`: a plain `python3 -m venv .venv` has no `etf-*` commands. (The daily
+  job runs `make venv` itself if any command is missing.)
 - **Never edit `run-report.sh` while the job is running**
   (`launchctl print gui/$(id -u)/com.dsvinod90.etf-analyst | grep state`): bash reads the
   script as it executes.

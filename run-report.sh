@@ -48,13 +48,24 @@ DISALLOWED=(WebFetch)
 cd "$REPO" || exit 1
 echo "== etf-analyst run started $(date)" >"$LOG"
 
-for c in "${COMMANDS[@]}"; do
-  if [[ ! -x "$BIN/$c" ]]; then
-    echo "== missing $BIN/$c; run 'make venv' in $REPO" >>"$LOG"
-    notify "Run failed: setup needed" "Run 'make venv' in the etf-analyst folder" "$LOG"
-    exit 1
-  fi
-done
+# The agents call the commands in .venv/bin, which exist only once the package is installed
+# there. If any is missing (e.g. .venv was recreated without installing), rebuild it.
+missing_commands() {
+  local c
+  for c in "${COMMANDS[@]}"; do
+    [[ -x "$BIN/$c" ]] || echo "$c"
+  done
+}
+if [[ -n "$(missing_commands)" ]]; then
+  echo "== missing commands: $(missing_commands | tr '\n' ' ')- running 'make venv'" >>"$LOG"
+  rm -f "$BIN/activate"  # force make to reinstall even if .venv looks up to date
+  make -C "$REPO" venv >>"$LOG" 2>&1
+fi
+if [[ -n "$(missing_commands)" ]]; then
+  echo "== still missing: $(missing_commands | tr '\n' ' ')" >>"$LOG"
+  notify "Run failed: setup needed" "Run 'make venv' in the etf-analyst folder" "$LOG"
+  exit 1
+fi
 
 claude -p "Run your full workflow: screen the US ETF market with the latest prices, rank ETFs for long-term and short-term investing with explanations, and publish the report as a PDF per Step 5. Return the PDF path first, then the full report." \
   --agent etf-analyst \

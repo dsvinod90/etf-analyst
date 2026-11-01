@@ -48,7 +48,7 @@ ln -s ~/Dev/etf-analyst/.claude/agents/etf-analyst.md ~/.claude/agents/etf-analy
 ln -s ~/Dev/etf-analyst/.claude/agents/etf-report-verifier.md ~/.claude/agents/etf-report-verifier.md
 ```
 
-The symlinks make the agents available in every Claude Code session. The agents and `run-report.sh` call the commands in `~/Dev/etf-analyst/.venv/bin/`; if you clone somewhere else, update those paths in `.claude/agents/*.md`, `run-report.sh` and the launchd plist.
+Always create `.venv` with `make venv`; a plain `python3 -m venv .venv` won't contain the `etf-*` commands (the daily job rebuilds it with `make venv` if any are missing). The symlinks make the agents available in every Claude Code session. The agents and `run-report.sh` call the commands in `~/Dev/etf-analyst/.venv/bin/`; if you clone somewhere else, update those paths in `.claude/agents/*.md`, `run-report.sh` and the launchd plist.
 
 ## Usage
 
