@@ -149,6 +149,12 @@ scanning alert; each has a test in `tests/`. Don't regress them.
   *after* sanitizing, from `html.escape`d values.
 - **Shell and AppleScript:** pass values as arguments (`osascript … on run argv`,
   `terminal-notifier -open <file:// URL>`), never by splicing them into code.
+- **Agent tools** (the `tools:` line in `.claude/agents/*.md`) are limited to `Bash, Read, Write,
+  WebSearch`. **Never add WebFetch**: the agents read untrusted content, and WebFetch would let
+  injected text send data to a URL. The agents are also installed globally for interactive use,
+  where `run-report.sh`'s allowlist doesn't apply, so this line is the hard limit there; Bash and
+  Read can't be scoped in it (tested), so interactive sessions rely on Claude Code's approval
+  prompts for everything else. `tests/test_agent_files.py` enforces the tool list.
 - **Agent permissions** (`ALLOWED` / `DISALLOWED` in `run-report.sh`) stay minimal: Bash only
   for the four `etf-*` commands in `.venv/bin/`, Read/Edit only under `reports/` (plus reading
   `metrics.py` for its docstrings), no WebFetch. Never add broad rules such as
