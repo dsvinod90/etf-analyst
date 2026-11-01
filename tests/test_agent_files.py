@@ -65,3 +65,23 @@ def test_every_repo_path_an_agent_mentions_exists(agent: Path) -> None:
 def test_readable_files_in_run_report_exist() -> None:
     for rel in re.findall(r'"Read\(~/Dev/etf-analyst/([^)*]+)\)"', RUN_REPORT.read_text()):
         assert (paths.ROOT / rel).exists(), f"run-report.sh allows reading missing {rel}"
+
+
+ALLOWED_AGENT_TOOLS = {"Bash", "Read", "Write", "WebSearch"}
+
+
+def agent_tools(agent: Path) -> set[str]:
+    m = re.search(r"^tools:\s*(.+)$", agent.read_text(), re.MULTILINE)
+    assert m, f"{agent.name} must list its tools explicitly (omitting the field grants all tools)"
+    return {t.strip() for t in m[1].split(",")}
+
+
+@pytest.mark.parametrize("agent", AGENT_FILES, ids=lambda p: p.stem)
+def test_agents_have_only_the_tools_they_need(agent: Path) -> None:
+    """No WebFetch: injected text in a page or report must not be able to send data to a URL.
+
+    The agents are also installed globally for interactive use, where run-report.sh's
+    allowlist doesn't apply, so the tools line is the only hard limit there.
+    """
+    assert agent_tools(agent) <= ALLOWED_AGENT_TOOLS
+    assert "WebFetch" not in agent_tools(agent)
